@@ -1,0 +1,6 @@
+/build/
+/core/target/
+/bench/target/
+build.log
+*.foglio-tmp.xlsx
+.DS_Store
