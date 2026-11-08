@@ -43,7 +43,7 @@ struct ViewportOwned {
 }
 
 #[derive(Clone, Copy)]
-struct StyleInfo {
+pub(crate) struct StyleInfo {
     align: u8,
     bold: u8,
     italic: u8,
@@ -52,28 +52,28 @@ struct StyleInfo {
 }
 
 pub struct FoglioBook {
-    model: UserModel<'static>,
-    style_cache: HashMap<i32, StyleInfo>,
+    pub(crate) model: UserModel<'static>,
+    pub(crate) style_cache: HashMap<i32, StyleInfo>,
 }
 
 // ---------- helpers ----------
 
-fn guard<T>(default: T, f: impl FnOnce() -> T) -> T {
+pub(crate) fn guard<T>(default: T, f: impl FnOnce() -> T) -> T {
     catch_unwind(AssertUnwindSafe(f)).unwrap_or(default)
 }
 
-unsafe fn cstr<'a>(p: *const c_char) -> Option<&'a str> {
+pub(crate) unsafe fn cstr<'a>(p: *const c_char) -> Option<&'a str> {
     if p.is_null() {
         return None;
     }
     CStr::from_ptr(p).to_str().ok()
 }
 
-fn to_c(s: String) -> *mut c_char {
+pub(crate) fn to_c(s: String) -> *mut c_char {
     CString::new(s.replace('\0', "")).map(|c| c.into_raw()).unwrap_or(ptr::null_mut())
 }
 
-unsafe fn write_err(err_out: *mut *mut c_char, msg: String) {
+pub(crate) unsafe fn write_err(err_out: *mut *mut c_char, msg: String) {
     if !err_out.is_null() {
         *err_out = to_c(msg);
     }
@@ -110,7 +110,7 @@ fn book_ref<'a>(b: *const FoglioBook) -> Option<&'a FoglioBook> {
 }
 
 impl FoglioBook {
-    fn wrap(model: UserModel<'static>) -> *mut FoglioBook {
+    pub(crate) fn wrap(model: UserModel<'static>) -> *mut FoglioBook {
         Box::into_raw(Box::new(FoglioBook { model, style_cache: HashMap::new() }))
     }
 
