@@ -972,7 +972,8 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
     // load comments, tables and hyperlink relationships
     let mut sheet_rels = HashMap::new();
     for sheet in &workbook.worksheets {
-        let rel = &rels[&sheet.id];
+        // Foglio fork: a sheet without a relationship is skipped instead of panicking (Excel repairs such files).
+        let Some(rel) = rels.get(&sheet.id) else { continue };
         if rel.rel_type.ends_with("worksheet") {
             let path = &rel.target;
             let path = if let Some(p) = path.strip_prefix('/') {
@@ -997,7 +998,7 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
         let sheet_name = &sheet.name;
         let rel_id = &sheet.id;
         let state = &sheet.state;
-        let rel = &rels[rel_id];
+        let Some(rel) = rels.get(rel_id) else { continue };
         if rel.rel_type.ends_with("worksheet") {
             let path = &rel.target;
             let path = if let Some(p) = path.strip_prefix('/') {

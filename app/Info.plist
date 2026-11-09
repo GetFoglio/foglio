@@ -43,6 +43,8 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.microsoft.excel.xls</string>
+                <string>org.openxmlformats.spreadsheetml.sheet.macroenabled</string>
+                <string>com.microsoft.excel.sheet.binary.macroenabled</string>
                 <string>org.foglio.xlsm</string>
                 <string>org.foglio.xlsb</string>
                 <string>org.oasis-open.opendocument.spreadsheet</string>

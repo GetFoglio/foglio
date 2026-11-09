@@ -82,7 +82,20 @@ final class Workbook {
     init(contentsOf url: URL) throws {
         var err: UnsafeMutablePointer<CChar>?
         guard let p = foglio_open_any(url.path, &err) else {
-            throw EngineError(message: Workbook.take(err) ?? L("The file could not be read."))
+            let raw = Workbook.take(err) ?? ""
+            let lower = raw.lowercased()
+            // Plain-language reasons for the common cases (details stay available below).
+            let msg: String
+            if lower.contains("password") || lower.contains("encrypt") {
+                msg = L("This workbook is protected with a password. Foglio can't open encrypted files yet.")
+            } else if lower.contains("invalid ole") || lower.contains("biff") || lower.contains("not an office document") {
+                msg = L("This file is in a very old Excel format (Excel 4 or earlier) that Foglio can't read.")
+            } else if lower.contains("entity") || lower.contains("eocd") || lower.contains("zip") {
+                msg = L("The file is damaged or isn't a valid spreadsheet.")
+            } else {
+                msg = raw.isEmpty ? L("The file could not be read.") : raw
+            }
+            throw EngineError(message: msg)
         }
         ptr = p
     }

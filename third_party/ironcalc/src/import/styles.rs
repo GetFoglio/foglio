@@ -303,11 +303,9 @@ pub(super) fn load_styles<R: Read + std::io::Seek>(
 
     let mut cell_styles = Vec::new();
     let mut style_names = HashMap::new();
-    let cell_style_nodes = style_sheet
-        .children()
-        .filter(|n| n.has_tag_name("cellStyles"))
-        .collect::<Vec<&XmlNode>>()[0];
-    for cell_style in cell_style_nodes.children() {
+    // Foglio fork: <cellStyles> is optional in practice (some generators omit it).
+    let cell_style_nodes = style_sheet.children().find(|n| n.has_tag_name("cellStyles"));
+    for cell_style in cell_style_nodes.iter().flat_map(|n| n.children()) {
         let name = get_attribute(cell_style, "name")?.to_string();
         let xf_id = get_number(cell_style, "xfId");
         let builtin_id = get_number(cell_style, "builtinId");

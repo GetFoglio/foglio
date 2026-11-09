@@ -392,8 +392,10 @@ impl SheetDataReader<'_, '_> {
         let Some(row) = self.row.as_mut() else {
             return Err(XlsxError::Xml("Cell outside of a row".to_string()));
         };
-        let (r_index, column_index) =
-            parse_cell_reference(&cell.reference).map_err(XlsxError::Xml)?;
+        // Foglio fork: a cell with a malformed reference is dropped (as Excel's repair does) instead of failing the file.
+        let Ok((r_index, column_index)) = parse_cell_reference(&cell.reference) else {
+            return Ok(());
+        };
         // A row without an `r` attribute takes its index from its first cell
         if row.index.is_none() {
             row.index = Some(r_index);

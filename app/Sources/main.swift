@@ -19,8 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Command-line paths (handy for scripts/tests): open them like Finder would.
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
         for path in args {
-            NSDocumentController.shared.openDocument(withContentsOf: URL(fileURLWithPath: path), display: true) { _, _, err in
-                if let err { NSApp.presentError(err) }
+            NSDocumentController.shared.openDocument(withContentsOf: URL(fileURLWithPath: path), display: true) { [weak self] _, _, err in
+                if let err {
+                    // Automated corpus runs: report and quit instead of waiting on an alert.
+                    if self?.env["FOGLIO_EXIT_AFTER_FIRST_FRAME"] != nil { print("OPEN_ERROR=\(((err as NSError).userInfo[NSUnderlyingErrorKey] as? Error)?.localizedDescription ?? err.localizedDescription)"); fflush(stdout); exit(3) }
+                    NSApp.presentError(err)
+                }
             }
         }
         setUpBenchmarks()
