@@ -40,6 +40,7 @@ pub unsafe extern "C" fn foglio_set_locale(locale: *const c_char, language: *con
     };
     *SETTINGS.lock().unwrap() = (locale, language, tz);
 }
+mod features;
 mod fnames;
 pub mod io;
 
