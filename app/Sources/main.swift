@@ -4,12 +4,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let env = ProcessInfo.processInfo.environment
 
     func applicationWillFinishLaunching(_ n: Notification) {
+        Perf.shared.mark("WILL_FINISH")
         FormulaLocale.current.apply()
         NSApp.mainMenu = Menus.mainMenu()
         NSWindow.allowsAutomaticWindowTabbing = true
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        Perf.shared.mark("DID_FINISH")
         // Command-line paths (handy for scripts/tests): open them like Finder would.
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
         for path in args {

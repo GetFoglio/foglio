@@ -1,0 +1,5 @@
+name,qty,price,note
+Apple,3,1.5,"red, round"
+Pear,10,0.25,"says ""hi"""
+Formula,=1+1,-2,"multi
+line"

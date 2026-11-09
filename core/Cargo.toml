@@ -8,10 +8,18 @@ license = "Apache-2.0"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+calamine = "0.38"
+cfb = "0.16"
+csv = "1.4"
+encoding_rs = "0.8"
 ironcalc = "0.9"
+serde_json = "1"
 
 [profile.release]
 opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+rust_xlsxwriter = { version = "0.102", default-features = false }

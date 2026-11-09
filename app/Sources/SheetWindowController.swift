@@ -673,7 +673,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         p.nameFieldStringValue = "\(base) - \(grid.book.sheetNames[safe: grid.sheet] ?? "").csv"
         p.beginSheetModal(for: w) { [weak self] r in
             guard let self, r == .OK, let url = p.url else { return }
-            do { try self.grid.book.saveCSV(sheet: self.grid.sheet, to: url) } catch { self.alert(L("Export failed"), error.localizedDescription) }
+            do { try self.grid.book.saveCSV(sheet: self.grid.sheet, to: url, delimiter: FormulaLocale.current.csvDelimiter) } catch { self.alert(L("Export failed"), error.localizedDescription) }
         }
     }
 

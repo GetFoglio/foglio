@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 
 /// One cell returned by a viewport fetch. Coordinates are 0-based.
 struct VCell {
@@ -68,8 +69,10 @@ final class Workbook {
     var onChange: (() -> Void)?
 
     init() {
+        let t = CACurrentMediaTime()
         guard let p = foglio_new() else { fatalError("engine init failed") }
         ptr = p
+        Perf.shared.emit("ENGINE_NEW_MS", String(format: "%.1f", (CACurrentMediaTime() - t) * 1000))
     }
 
     /// Opens any supported spreadsheet file (xlsx, xlsm, xls, xlsb, ods, csv, tsv, txt).
@@ -368,6 +371,9 @@ struct FormulaLocale {
     }()
 
     func apply() { foglio_set_locale(locale, language, timezone) }
+
+    /// Excel uses ";" in CSV files where the decimal separator is a comma.
+    var csvDelimiter: Character { locale.hasPrefix("en") ? "," : ";" }
 
     /// Date pattern matching the engine's input parser for this locale.
     var datePattern: String {

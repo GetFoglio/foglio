@@ -32,7 +32,7 @@ final class SpreadsheetDocument: NSDocument {
     override func write(to url: URL, ofType typeName: String) throws {
         windowController?.grid.commitEditing(move: nil)
         if typeName == FileTypes.csv || typeName == FileTypes.tsv || url.pathExtension.lowercased() == "csv" {
-            try book.saveCSV(sheet: activeSheet, to: url, delimiter: typeName == FileTypes.tsv ? "\t" : ",")
+            try book.saveCSV(sheet: activeSheet, to: url, delimiter: typeName == FileTypes.tsv ? "\t" : FormulaLocale.current.csvDelimiter)
         } else {
             try book.saveXLSX(to: url)
         }

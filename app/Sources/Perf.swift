@@ -26,6 +26,12 @@ final class Perf {
         fflush(stdout)
     }
 
+    /// Milliseconds since process start, printed as KEY_MS.
+    func mark(_ key: String) {
+        guard enabled, let start = processStart() else { return }
+        emit(key + "_MS", String(format: "%.1f", Date().timeIntervalSince(start) * 1000))
+    }
+
     func frameDrawn(ms: Double) {
         if !firstFrameDone {
             firstFrameDone = true
