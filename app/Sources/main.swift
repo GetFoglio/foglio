@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ n: Notification) {
         Perf.shared.mark("WILL_FINISH")
+        if let a = env["FOGLIO_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
         FormulaLocale.current.apply()
         NSApp.mainMenu = Menus.mainMenu()
         NSWindow.allowsAutomaticWindowTabbing = true
