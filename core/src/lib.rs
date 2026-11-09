@@ -8,47 +8,71 @@ use std::ptr;
 use std::time::Instant;
 
 use ironcalc::base::expressions::types::Area;
-use ironcalc::base::types::{CellType, Color, HorizontalAlignment};
 use ironcalc::base::{Model, UserModel};
 
-const NO_COLOR: u32 = 0xFFFF_FFFF;
+pub(crate) const NO_COLOR: u32 = 0xFFFF_FFFF;
+
+mod ui;
+mod fnames;
+pub mod io;
 
 #[repr(C)]
 pub struct FoglioCell {
-    row: i32,
-    col: i32,
-    text_off: u32,
-    text_len: u32,
-    kind: u8,
-    align: u8,
-    bold: u8,
-    italic: u8,
-    fg: u32,
-    bg: u32,
+    pub(crate) row: i32,
+    pub(crate) col: i32,
+    pub(crate) text_off: u32,
+    pub(crate) text_len: u32,
+    pub(crate) kind: u8,
+    pub(crate) align: u8,
+    pub(crate) bold: u8,
+    pub(crate) italic: u8,
+    pub(crate) fg: u32,
+    pub(crate) bg: u32,
+    /// font size in points (Excel units, 11 = default)
+    pub(crate) font_size: u8,
+    pub(crate) underline: u8,
+    pub(crate) strike: u8,
+    pub(crate) wrap: u8,
+    /// 0 bottom, 1 center, 2 top
+    pub(crate) valign: u8,
+    /// bit0 top, bit1 right, bit2 bottom, bit3 left
+    pub(crate) border_mask: u8,
+    /// 1 thin, 2 medium, 3 thick, 4 double (max of the sides)
+    pub(crate) border_weight: u8,
+    pub(crate) _pad: u8,
+    pub(crate) border_color: u32,
 }
 
 #[repr(C)]
 pub struct FoglioViewport {
-    cells: *const FoglioCell,
-    count: usize,
-    text: *const u8,
-    text_len: usize,
+    pub(crate) cells: *const FoglioCell,
+    pub(crate) count: usize,
+    pub(crate) text: *const u8,
+    pub(crate) text_len: usize,
 }
 
 #[repr(C)]
-struct ViewportOwned {
-    header: FoglioViewport,
-    _cells: Vec<FoglioCell>,
-    _text: Vec<u8>,
+pub(crate) struct ViewportOwned {
+    pub(crate) header: FoglioViewport,
+    pub(crate) _cells: Vec<FoglioCell>,
+    pub(crate) _text: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct StyleInfo {
-    align: u8,
-    bold: u8,
-    italic: u8,
-    fg: u32,
-    bg: u32,
+    pub(crate) align: u8,
+    pub(crate) bold: u8,
+    pub(crate) italic: u8,
+    pub(crate) fg: u32,
+    pub(crate) bg: u32,
+    pub(crate) font_size: u8,
+    pub(crate) underline: u8,
+    pub(crate) strike: u8,
+    pub(crate) wrap: u8,
+    pub(crate) valign: u8,
+    pub(crate) border_mask: u8,
+    pub(crate) border_weight: u8,
+    pub(crate) border_color: u32,
 }
 
 pub struct FoglioBook {
@@ -79,7 +103,7 @@ pub(crate) unsafe fn write_err(err_out: *mut *mut c_char, msg: String) {
     }
 }
 
-fn rc(r: Result<(), String>) -> i32 {
+pub(crate) fn rc(r: Result<(), String>) -> i32 {
     if r.is_ok() {
         0
     } else {
@@ -87,13 +111,13 @@ fn rc(r: Result<(), String>) -> i32 {
     }
 }
 
-fn area(sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> Area {
+pub(crate) fn area(sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> Area {
     let (r0, r1) = (r0.min(r1), r0.max(r1));
     let (c0, c1) = (c0.min(c1), c0.max(c1));
     Area { sheet, row: r0, column: c0, width: c1 - c0 + 1, height: r1 - r0 + 1 }
 }
 
-fn parse_rgb(s: &str) -> u32 {
+pub(crate) fn parse_rgb(s: &str) -> u32 {
     let h = s.trim_start_matches('#');
     if h.len() == 6 {
         u32::from_str_radix(h, 16).unwrap_or(NO_COLOR)
@@ -102,10 +126,10 @@ fn parse_rgb(s: &str) -> u32 {
     }
 }
 
-fn book<'a>(b: *mut FoglioBook) -> Option<&'a mut FoglioBook> {
+pub(crate) fn book<'a>(b: *mut FoglioBook) -> Option<&'a mut FoglioBook> {
     unsafe { b.as_mut() }
 }
-fn book_ref<'a>(b: *const FoglioBook) -> Option<&'a FoglioBook> {
+pub(crate) fn book_ref<'a>(b: *const FoglioBook) -> Option<&'a FoglioBook> {
     unsafe { b.as_ref() }
 }
 
@@ -114,36 +138,27 @@ impl FoglioBook {
         Box::into_raw(Box::new(FoglioBook { model, style_cache: HashMap::new() }))
     }
 
-    fn style_info(&mut self, sheet: u32, row: i32, col: i32) -> StyleInfo {
+    pub(crate) fn style_info(&mut self, sheet: u32, row: i32, col: i32) -> StyleInfo {
         let model: &Model = self.model.get_model();
+        let has_cf = model
+            .workbook
+            .worksheets
+            .get(sheet as usize)
+            .map(|w| !w.conditional_formatting.is_empty())
+            .unwrap_or(false);
+        if has_cf {
+            // Conditional formatting depends on the value: no caching by style index.
+            if let Ok(ext) = self.model.get_extended_cell_style(sheet, row, col) {
+                return ui::style_to_info(&ext.style, &self.model.get_model().workbook.theme);
+            }
+        }
         let idx = model.get_cell_style_index(sheet, row, col).unwrap_or(0);
         if let Some(s) = self.style_cache.get(&idx) {
             return *s;
         }
         let info = match model.get_style_for_cell(sheet, row, col) {
-            Ok(st) => {
-                let theme = &model.workbook.theme;
-                let color = |c: &Color| match c {
-                    Color::None => NO_COLOR,
-                    other => parse_rgb(&other.to_rgb(theme)),
-                };
-                let align = match st.alignment.as_ref().map(|a| &a.horizontal) {
-                    Some(HorizontalAlignment::Left) => 1,
-                    Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => 2,
-                    Some(HorizontalAlignment::Right) => 3,
-                    _ => 0,
-                };
-                let fg = color(&st.font.color);
-                StyleInfo {
-                    align,
-                    bold: st.font.b as u8,
-                    italic: st.font.i as u8,
-                    // Black is the default font colour; report it as "default" so dark mode works.
-                    fg: if fg == 0x000000 { NO_COLOR } else { fg },
-                    bg: color(&st.fill.color),
-                }
-            }
-            Err(_) => StyleInfo { align: 0, bold: 0, italic: 0, fg: NO_COLOR, bg: NO_COLOR },
+            Ok(st) => ui::style_to_info(&st, &model.workbook.theme),
+            Err(_) => ui::style_to_info(&Default::default(), &model.workbook.theme),
         };
         self.style_cache.insert(idx, info);
         info
@@ -336,65 +351,6 @@ pub extern "C" fn foglio_can_undo(b: *const FoglioBook) -> bool {
 #[no_mangle]
 pub extern "C" fn foglio_can_redo(b: *const FoglioBook) -> bool {
     book_ref(b).map(|b| b.model.can_redo()).unwrap_or(false)
-}
-
-// ---------- viewport (hot path) ----------
-
-#[no_mangle]
-pub extern "C" fn foglio_viewport(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> *mut FoglioViewport {
-    let Some(b) = book(b) else { return ptr::null_mut() };
-    guard(ptr::null_mut(), || {
-        // Collect coordinates first (immutable borrow of the sheet), then format.
-        let coords: Vec<(i32, i32)> = {
-            let model = b.model.get_model();
-            let Some(ws) = model.workbook.worksheets.get(sheet as usize) else { return ptr::null_mut() };
-            let mut v = Vec::new();
-            for row in r0..=r1 {
-                for (col, _) in ws.sheet_data.cells_in_row_between(row, c0, c1) {
-                    v.push((row, col));
-                }
-            }
-            v
-        };
-        let mut cells = Vec::with_capacity(coords.len());
-        let mut text: Vec<u8> = Vec::with_capacity(coords.len() * 8);
-        for (row, col) in coords {
-            let s = b.model.get_formatted_cell_value(sheet, row, col).unwrap_or_default();
-            let kind = match b.model.get_cell_type(sheet, row, col) {
-                Ok(CellType::Number) => 1,
-                Ok(CellType::LogicalValue) => 2,
-                Ok(CellType::ErrorValue) => 3,
-                _ => 0,
-            };
-            let st = b.style_info(sheet, row, col);
-            let off = text.len() as u32;
-            text.extend_from_slice(s.as_bytes());
-            cells.push(FoglioCell {
-                row, col, text_off: off, text_len: s.len() as u32,
-                kind, align: st.align, bold: st.bold, italic: st.italic, fg: st.fg, bg: st.bg,
-            });
-        }
-        let mut owned = Box::new(ViewportOwned {
-            header: FoglioViewport { cells: ptr::null(), count: 0, text: ptr::null(), text_len: 0 },
-            _cells: cells,
-            _text: text,
-        });
-        owned.header = FoglioViewport {
-            cells: owned._cells.as_ptr(),
-            count: owned._cells.len(),
-            text: owned._text.as_ptr(),
-            text_len: owned._text.len(),
-        };
-        // `header` is the first field, so a pointer to the box is a pointer to the header.
-        Box::into_raw(owned) as *mut FoglioViewport
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn foglio_viewport_free(v: *mut FoglioViewport) {
-    if !v.is_null() {
-        drop(Box::from_raw(v as *mut ViewportOwned));
-    }
 }
 
 #[no_mangle]

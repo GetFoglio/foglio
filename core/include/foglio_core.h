@@ -6,7 +6,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#ifndef FOGLIO_BOOK_DEFINED
+#define FOGLIO_BOOK_DEFINED
 typedef struct FoglioBook FoglioBook;
+#endif
 
 enum { FOGLIO_KIND_TEXT = 0, FOGLIO_KIND_NUMBER = 1, FOGLIO_KIND_BOOL = 2, FOGLIO_KIND_ERROR = 3 };
 enum { FOGLIO_ALIGN_GENERAL = 0, FOGLIO_ALIGN_LEFT = 1, FOGLIO_ALIGN_CENTER = 2, FOGLIO_ALIGN_RIGHT = 3 };
@@ -18,6 +21,13 @@ typedef struct {
     uint8_t kind, align, bold, italic;
     uint32_t fg;                   // 0xRRGGBB or FOGLIO_NO_COLOR
     uint32_t bg;                   // 0xRRGGBB or FOGLIO_NO_COLOR
+    uint8_t font_size;             // points, Excel units (11 = default)
+    uint8_t underline, strike, wrap;
+    uint8_t valign;                // 0 bottom, 1 center, 2 top
+    uint8_t border_mask;           // bit0 top, bit1 right, bit2 bottom, bit3 left
+    uint8_t border_weight;         // 1 thin, 2 medium, 3 thick, 4 double
+    uint8_t _pad;
+    uint32_t border_color;         // 0xRRGGBB or FOGLIO_NO_COLOR (= automatic)
 } FoglioCell;
 
 typedef struct {
@@ -52,9 +62,8 @@ int32_t foglio_redo(FoglioBook *b);
 bool foglio_can_undo(const FoglioBook *b);
 bool foglio_can_redo(const FoglioBook *b);
 
-// Hot path: every non-empty (or styled) cell in the inclusive range, in one call.
-FoglioViewport *foglio_viewport(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
-void foglio_viewport_free(FoglioViewport *v);
 
 // Benchmark helper: full workbook evaluation, returns elapsed microseconds.
 uint64_t foglio_evaluate_us(FoglioBook *b);
+
+#include "foglio_ui.h"
