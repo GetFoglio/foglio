@@ -170,6 +170,13 @@ export interface SiteCopy {
     faq: FAQ[];
   };
 
+  /** What Foglio is (and is not) trying to be. Shown on the home and above the comparison table. */
+  positioning: {
+    title: string;
+    text: string[];
+    points: { title: string; text: string }[];
+  };
+
   alternativesIndex: { h1: string; intro: string[] };
   guidesIndex: { h1: string; intro: string[] };
 }

@@ -110,14 +110,24 @@ export function DownloadButtons({ locale, center }: { locale: Locale; center?: b
   );
 }
 
-/** Real screenshot of the app, light or dark following the visitor's system setting. */
+/**
+ * Real screenshot of the app, light or dark following the visitor's system setting.
+ * AVIF (≈20 KB) with WebP fallback, two widths, explicit size so nothing shifts while loading.
+ */
 export function Screenshot({ locale, alt, priority }: { locale: Locale; alt: string; priority?: boolean }) {
+  const set = (theme: string, ext: string) =>
+    [720, 1213].map((w) => `${asset(`/screenshots/${locale}-${theme}-${w}.${ext}`)} ${w}w`).join(", ");
+  const sizes = "(max-width: 1112px) calc(100vw - 32px), 1080px";
   return (
     <figure className="shot">
       <picture>
-        <source srcSet={asset(`/screenshots/${locale}-dark.webp`)} media="(prefers-color-scheme: dark)" />
+        <source type="image/avif" srcSet={set("dark", "avif")} sizes={sizes} media="(prefers-color-scheme: dark)" />
+        <source type="image/webp" srcSet={set("dark", "webp")} sizes={sizes} media="(prefers-color-scheme: dark)" />
+        <source type="image/avif" srcSet={set("light", "avif")} sizes={sizes} />
         <img
-          src={asset(`/screenshots/${locale}-light.webp`)}
+          src={asset(`/screenshots/${locale}-light-1213.webp`)}
+          srcSet={set("light", "webp")}
+          sizes={sizes}
           width={1213}
           height={813}
           alt={alt}
@@ -149,5 +159,29 @@ export function PageHero({
         <Paragraphs items={intro} locale={locale} className="lead" />
       </div>
     </header>
+  );
+}
+
+/** "We are not trying to be Excel": the project's goal, shown on the home and the comparison page. */
+export function Positioning({ locale, headingLevel = 2 }: { locale: Locale; headingLevel?: 2 | 3 }) {
+  const p = copy[locale].positioning;
+  const H = headingLevel === 2 ? "h2" : "h3";
+  return (
+    <div className="positioning">
+      <div className="positioning-text">
+        <H id="goal">{p.title}</H>
+        <Paragraphs items={p.text} locale={locale} />
+      </div>
+      <ul className="positioning-points">
+        {p.points.map((pt) => (
+          <li key={pt.title}>
+            <strong>{pt.title}</strong>
+            <span>
+              <Inline text={pt.text} locale={locale} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

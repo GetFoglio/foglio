@@ -403,6 +403,18 @@ export const copyEn: SiteCopy = {
     ],
   },
 
+  positioning: {
+    title: "We are not trying to be Excel",
+    text: [
+      "Excel does a thousand things, and some of them (macros, Power Pivot, real-time co-authoring) Foglio will probably never do. That is fine: copying Excel feature by feature is not the goal.",
+      "The goal is a spreadsheet that feels like part of your Mac: native, fast, tiny, gentle on memory and battery, and able to open **practically every Excel file you receive** (we aim for 99 out of 100) without breaking it when you save it back.",
+    ],
+    points: [
+      { title: "Native", text: "A real Mac app in Swift and AppKit. No browser engine inside, no runtime to install." },
+      { title: "Fast and small", text: "7.5 MB to download, open in a quarter of a second, about 58 MB of memory with a sheet open." },
+      { title: "Compatible", text: "Reads and writes standard `.xlsx`, keeps your formulas in Excel's own form, so the file opens anywhere." },
+    ],
+  },
   alternativesIndex: {
     h1: "Alternatives to Excel, Numbers, LibreOffice and Google Sheets",
     intro: [

@@ -1,22 +1,35 @@
 # getfoglio.app
 
-The website of [Foglio](../README.md): Next.js (App Router) + TypeScript, exported as static HTML
-(`output: "export"`) and deployed to GitHub Pages by [`.github/workflows/site.yml`](../.github/workflows/site.yml).
+The website of [Foglio](https://github.com/Acid236/foglio), the free, open-source, native
+spreadsheet app for macOS.
+
+Next.js (App Router) + TypeScript, exported as static HTML. After `next build`,
+`scripts/postbuild.mjs` removes the client JavaScript the pages do not need, so visitors get plain
+HTML with inline CSS: about 12 KB (compressed) per page, plus one ~20 KB AVIF screenshot.
 
 ```sh
 npm ci
 npm run dev          # http://localhost:3000
 npm run lint && npm run typecheck
-npm run build        # → out/
+npm run build        # → out/ (static, no JavaScript)
+npx serve out        # preview the exact output
 ```
 
-- English lives at `/`, Italian at `/it/` (two root layouts: `src/app/(en)` and `src/app/(it)/it`).
-- All text is in `src/content/` (`copy.en.ts`, `copy.it.ts`, `comparison.ts`, `alternatives.ts`,
-  `guides.ts`); measured numbers come only from `src/content/facts.ts`. `SEO.md` has the keyword notes.
-- No client-side JavaScript of our own, no web fonts, no trackers. Screenshots are real renders of the
-  app (`public/screenshots/`).
-- Deploy: GitHub Pages serves the `gh-pages` branch. `scripts/deploy_site.sh` builds and publishes it
-  from your Mac; the workflow does the same on every push to `main` that touches `site/`.
-- Custom domain: `CUSTOM_DOMAIN=getfoglio.app scripts/deploy_site.sh` (and the repository variable
-  `CUSTOM_DOMAIN` for the workflow), then set the domain in *Settings ▸ Pages*. Without it the site is
-  built for `https://<owner>.github.io/foglio/`.
+## Deploy on Vercel
+
+Import this repository in Vercel. `vercel.json` already sets everything: install `npm ci`, build
+`npm run build`, output directory `out`, framework "Other" (static), trailing slashes, security
+headers (including a CSP with `script-src 'none'`) and caching. Then add the domain
+`getfoglio.app` in the project's *Domains* settings.
+
+## Content
+
+- English at `/`, Italian at `/it/` (two root layouts: `src/app/(en)` and `src/app/(it)/it`).
+- All text is in `src/content/`: `copy.en.ts`, `copy.it.ts`, `comparison.ts`, `alternatives.ts`,
+  `guides.ts`. Measured numbers come only from `src/content/facts.ts`. `SEO.md` has the keyword notes.
+- Screenshots in `public/screenshots/` are real renders of the app (light/dark, EN/IT, 720 and
+  1213 px, AVIF + WebP).
+
+## License
+
+MIT or Apache-2.0, at your option, like Foglio itself.

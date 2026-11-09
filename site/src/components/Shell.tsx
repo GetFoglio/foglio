@@ -29,7 +29,7 @@ export function Shell({ locale, path, children }: { locale: Locale; path: string
       <header className="site-header">
         <div className="wrap header-row">
           <Link href={href(locale, "/")} className="brand" aria-label={`${site.name} — home`}>
-            <img src={asset("/icon-256.png")} width={32} height={32} alt="" />
+            <img src={asset("/icon-64.webp")} width={32} height={32} alt="" />
             <span>{site.name}</span>
           </Link>
           <nav className="nav-desktop" aria-label="Main">
@@ -102,7 +102,7 @@ function Footer({ locale }: { locale: Locale }) {
       <div className="wrap footer-grid">
         <div>
           <div className="brand">
-            <img src={asset("/icon-256.png")} width={28} height={28} alt="" />
+            <img src={asset("/icon-64.webp")} width={28} height={28} alt="" />
             <span>{site.name}</span>
           </div>
           <p className="muted">{t.footerTagline}</p>

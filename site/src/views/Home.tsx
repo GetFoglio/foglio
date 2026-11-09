@@ -4,7 +4,7 @@ import { downloadUrl, facts, site, sizeComparisonMB } from "@/content/facts";
 import type { Locale } from "@/content/types";
 import { absolute, asset, formatNumber, href } from "@/lib/i18n";
 import { Bars, ComparisonTable } from "@/components/Comparison";
-import { DownloadButtons, Paragraphs, Screenshot } from "@/components/Blocks";
+import { DownloadButtons, Paragraphs, Positioning, Screenshot } from "@/components/Blocks";
 import { Faq } from "@/components/Faq";
 import { Icon } from "@/components/Icon";
 import { Inline, plain } from "@/components/Inline";
@@ -155,7 +155,13 @@ export function HomePage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <section className="section alt" aria-labelledby="compare">
+      <section className="section alt" aria-labelledby="goal">
+        <div className="wrap">
+          <Positioning locale={locale} />
+        </div>
+      </section>
+
+      <section className="section" aria-labelledby="compare">
         <div className="wrap">
           <div className="section-head">
             <h2 id="compare">{h.compareTitle}</h2>
@@ -173,7 +179,7 @@ export function HomePage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <section className="section" aria-labelledby="tech">
+      <section className="section alt" aria-labelledby="tech">
         <div className="wrap two-col align-center">
           <div>
             <h2 id="tech">{h.techTitle}</h2>
@@ -216,7 +222,7 @@ export function HomePage({ locale }: { locale: Locale }) {
 
       <section className="section final-cta">
         <div className="wrap narrow center">
-          <img src={asset("/icon-256.png")} width={96} height={96} alt="" loading="lazy" />
+          <img src={asset("/icon-192.webp")} width={96} height={96} alt="" loading="lazy" />
           <h2>{h.ctaTitle}</h2>
           <p className="lead">
             <Inline text={h.ctaText} locale={locale} />

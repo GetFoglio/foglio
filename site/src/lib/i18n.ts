@@ -18,9 +18,8 @@ export const otherLocale = (l: Locale): Locale => (l === "en" ? "it" : "en");
 export const htmlLang: Record<Locale, string> = { en: "en", it: "it" };
 export const ogLocale: Record<Locale, string> = { en: "en_US", it: "it_IT" };
 
-/** Base path for raw asset URLs (next/link adds it automatically, <img> does not). */
-export const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-export const asset = (p: string) => `${basePath}${p}`;
+/** URL of a file in public/ (kept as a function so a base path can be added in one place). */
+export const asset = (p: string) => p;
 
 export function formatDate(locale: Locale, iso: string): string {
   return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "it-IT", {

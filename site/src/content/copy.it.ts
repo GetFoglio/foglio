@@ -401,6 +401,18 @@ export const copyIt: SiteCopy = {
     ],
   },
 
+  positioning: {
+    title: "Non vogliamo essere Excel",
+    text: [
+      "Excel fa mille cose, e alcune (macro, Power Pivot, modifica a più mani in tempo reale) Foglio probabilmente non le farà mai. Va bene così: copiare Excel funzione per funzione non è l'obiettivo.",
+      "L'obiettivo è un foglio di calcolo che sembri parte del tuo Mac: nativo, veloce, piccolissimo, leggero su memoria e batteria, e capace di aprire **praticamente ogni file Excel che ricevi** (puntiamo a 99 su 100) senza rovinarlo quando lo salvi.",
+    ],
+    points: [
+      { title: "Nativo", text: "Una vera app Mac in Swift e AppKit. Nessun browser nascosto dentro, nessun runtime da installare." },
+      { title: "Veloce e piccolo", text: "7,5 MB da scaricare, si apre in un quarto di secondo, circa 58 MB di memoria con un foglio aperto." },
+      { title: "Compatibile", text: "Legge e scrive `.xlsx` standard e salva le formule nella forma di Excel, così il file si apre ovunque." },
+    ],
+  },
   alternativesIndex: {
     h1: "Alternative a Excel, Numbers, LibreOffice e Fogli Google per Mac",
     intro: [

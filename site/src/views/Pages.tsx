@@ -4,7 +4,7 @@ import { alternatives, comparisonChecked, comparisonSources, copy, guides } from
 import { downloadUrl, facts, releasesUrl, site } from "@/content/facts";
 import type { Article, Locale } from "@/content/types";
 import { absolute, formatDate, href } from "@/lib/i18n";
-import { Breadcrumbs, DownloadButtons, PageHero, Paragraphs, Prose, Screenshot } from "@/components/Blocks";
+import { Breadcrumbs, DownloadButtons, PageHero, Paragraphs, Positioning, Prose, Screenshot } from "@/components/Blocks";
 import { ComparisonTable } from "@/components/Comparison";
 import { Faq } from "@/components/Faq";
 import { Icon } from "@/components/Icon";
@@ -19,6 +19,7 @@ export function ComparePage({ locale }: { locale: Locale }) {
     <Shell locale={locale} path="/compare/">
       <PageHero locale={locale} h1={p.h1} intro={p.intro} trail={[{ name: c.ui.navCompare, path: "/compare/" }]} />
       <div className="wrap">
+        <Positioning locale={locale} />
         <h2 className="table-title">{p.tableTitle}</h2>
         <ComparisonTable locale={locale} caption={p.tableTitle} />
         <p className="muted small">
