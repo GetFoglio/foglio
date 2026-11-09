@@ -88,6 +88,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     private var boldButton: NSButton!, italicButton: NSButton!, underlineButton: NSButton!, wrapButton: NSButton!
     private var alignButtons: [NSButton] = []
     private let fontSizeBox = NSComboBox()
+    private let fontFamilyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let numberFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let textColor = ColorButton(symbol: "textformat", tip: L("Font Color"), initial: NSColor(srgbRed: 0.75, green: 0, blue: 0, alpha: 1),
                                         allowsNone: true, noneTitle: L("Automatic"))
@@ -211,6 +212,18 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         fontSizeBox.action = #selector(fontSizeChanged(_:))
         fontSizeBox.toolTip = L("Font Size")
 
+        fontFamilyPopup.controlSize = .small
+        fontFamilyPopup.font = .systemFont(ofSize: 11)
+        fontFamilyPopup.addItem(withTitle: L("Default"))
+        fontFamilyPopup.menu?.addItem(.separator())
+        for f in SheetWindowController.fontFamilies {
+            fontFamilyPopup.addItem(withTitle: f)
+            if let font = NSFont(name: f, size: 12) { fontFamilyPopup.lastItem?.attributedTitle = NSAttributedString(string: f, attributes: [.font: font]) }
+        }
+        fontFamilyPopup.target = self
+        fontFamilyPopup.action = #selector(fontFamilyChanged(_:))
+        fontFamilyPopup.toolTip = L("Font")
+        fontFamilyPopup.widthAnchor.constraint(equalToConstant: 118).isActive = true
         boldButton = button("bold", "Bold (⌘B)", #selector(boldAction(_:)), toggle: true)
         italicButton = button("italic", "Italic (⌘I)", #selector(italicAction(_:)), toggle: true)
         underlineButton = button("underline", "Underline (⌘U)", #selector(underlineAction(_:)), toggle: true)
@@ -268,7 +281,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         let groups: [(NSView, NSStackView.VisibilityPriority)] = [
             (group([undo, redo, painter]), .mustHold),
             (divider(), .mustHold),
-            (group([fontSizeBox, boldButton, italicButton, underlineButton, strike]), .mustHold),
+            (group([fontFamilyPopup, fontSizeBox, boldButton, italicButton, underlineButton, strike]), .mustHold),
             (divider(), NSStackView.VisibilityPriority(800)),
             (group([textColor, fillColor, borders]), NSStackView.VisibilityPriority(800)),
             (divider(), NSStackView.VisibilityPriority(900)),
@@ -401,6 +414,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             b.isBordered = false
             b.tag = i
             b.isCurrent = i == grid.sheet
+            let tc = grid.book.sheetColor(i)
+            b.tabColor = tc == VCell.noColor ? nil : SheetPainter.rgb(tc)
             b.setAccessibilityLabel(name)
             b.onDoubleClick = { [weak self] in self?.renameSheet(nil) }
             b.onDragTo = { [weak self] x in self?.dropTab(i, atX: x) }
@@ -430,6 +445,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
          .separator(),
          Menus.item("Hide", #selector(hideSheet(_:))),
          Menus.item("Unhide…", #selector(unhideSheet(_:)))].forEach { $0.target = self; m.addItem($0) }
+        m.addItem(.separator())
+        let tc = SheetWindowController.tabColorMenu()
+        tc.submenu?.items.forEach { $0.target = self }
+        m.addItem(tc)
         return m
     }
 
@@ -574,6 +593,12 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         wrapButton.state = st.wrap ? .on : .off
         for (i, b) in alignButtons.enumerated() { b.state = Int(st.align) == i + 1 ? .on : .off }
         fontSizeBox.stringValue = "\(st.fontSize)"
+        if let name = grid.book.fontName(sheet: grid.sheet, row: grid.active.row, col: grid.active.col),
+           !["calibri", "aptos", "aptos narrow"].contains(name.lowercased()), fontFamilyPopup.item(withTitle: name) != nil {
+            fontFamilyPopup.selectItem(withTitle: name)
+        } else {
+            fontFamilyPopup.selectItem(at: 0)
+        }
         let codes = NumberFormats.all.map(\.code)
         if let i = codes.firstIndex(where: { $0.lowercased() == st.numFmt.lowercased() }) {
             numberFormatPopup.selectItem(at: i)

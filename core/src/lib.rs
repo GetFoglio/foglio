@@ -68,7 +68,8 @@ pub struct FoglioCell {
     pub(crate) border_mask: u8,
     /// 2 bits per side (top, right, bottom, left from the low bits): 1 thin, 2 medium, 3 thick/double
     pub(crate) border_weight: u8,
-    pub(crate) _pad: u8,
+    /// 0 = default (theme) font, otherwise an id for foglio_font_name_by_id
+    pub(crate) font_id: u8,
     /// top, right, bottom, left — 0xRRGGBB or NO_COLOR (automatic)
     pub(crate) border_colors: [u32; 4],
 }
@@ -103,11 +104,14 @@ pub(crate) struct StyleInfo {
     pub(crate) border_mask: u8,
     pub(crate) border_weight: u8,
     pub(crate) border_colors: [u32; 4],
+    pub(crate) font_id: u8,
 }
 
 pub struct FoglioBook {
     pub(crate) model: UserModel<'static>,
     pub(crate) style_cache: HashMap<i32, StyleInfo>,
+    /// Interned explicit font names (id = index + 1).
+    pub(crate) font_names: Vec<String>,
 }
 
 // ---------- helpers ----------
@@ -165,7 +169,24 @@ pub(crate) fn book_ref<'a>(b: *const FoglioBook) -> Option<&'a FoglioBook> {
 
 impl FoglioBook {
     pub(crate) fn wrap(model: UserModel<'static>) -> *mut FoglioBook {
-        Box::into_raw(Box::new(FoglioBook { model, style_cache: HashMap::new() }))
+        Box::into_raw(Box::new(FoglioBook { model, style_cache: HashMap::new(), font_names: Vec::new() }))
+    }
+
+    /// Theme fonts (and the Office defaults) render with the system font: id 0.
+    fn font_id(&mut self, f: &ironcalc::base::types::Font) -> u8 {
+        use ironcalc::base::types::FontScheme;
+        let n = f.name.trim();
+        if f.scheme != FontScheme::None || n.is_empty() || ["calibri", "aptos", "aptos narrow", "calibri light"].contains(&n.to_lowercase().as_str()) {
+            return 0;
+        }
+        if let Some(i) = self.font_names.iter().position(|x| x == n) {
+            return (i + 1).min(255) as u8;
+        }
+        if self.font_names.len() >= 254 {
+            return 0;
+        }
+        self.font_names.push(n.to_string());
+        self.font_names.len() as u8
     }
 
     pub(crate) fn style_info(&mut self, sheet: u32, row: i32, col: i32) -> StyleInfo {
@@ -179,20 +200,31 @@ impl FoglioBook {
         if has_cf {
             // Conditional formatting depends on the value: no caching by style index.
             if let Ok(ext) = self.model.get_extended_cell_style(sheet, row, col) {
-                return ui::style_to_info(&ext.style, &self.model.get_model().workbook.theme);
+                let mut info = ui::style_to_info(&ext.style, &self.model.get_model().workbook.theme);
+                info.font_id = self.font_id(&ext.style.font);
+                return info;
             }
         }
         let idx = model.get_cell_style_index(sheet, row, col).unwrap_or(0);
         if let Some(s) = self.style_cache.get(&idx) {
             return *s;
         }
-        let info = match model.get_style_for_cell(sheet, row, col) {
-            Ok(st) => ui::style_to_info(&st, &model.workbook.theme),
-            Err(_) => ui::style_to_info(&Default::default(), &model.workbook.theme),
-        };
+        let st = model.get_style_for_cell(sheet, row, col).unwrap_or_default();
+        let mut info = ui::style_to_info(&st, &model.workbook.theme);
+        info.font_id = self.font_id(&st.font);
         self.style_cache.insert(idx, info);
         info
     }
+}
+
+/// Name for a font id from FoglioCell.font_id (NULL for 0/unknown).
+#[no_mangle]
+pub extern "C" fn foglio_font_name_by_id(b: *const FoglioBook, id: u8) -> *mut c_char {
+    let Some(b) = book_ref(b) else { return ptr::null_mut() };
+    if id == 0 {
+        return ptr::null_mut();
+    }
+    b.font_names.get(id as usize - 1).map(|n| to_c(n.clone())).unwrap_or(ptr::null_mut())
 }
 
 // ---------- lifecycle ----------

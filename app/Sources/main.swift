@@ -335,6 +335,27 @@ enum UIScript {
             case "transpose": c.grid.pasteTransposed()
             case "removedups": c.grid.removeDuplicates(nil)
             case "insertrows": c.grid.insertRows(nil)
+            case "comment": // comment B2 text
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let r = parseA1(p[0]) { c.grid.book.setComment(sheet: c.grid.sheet, row: r.row, col: r.col, p[1], author: "Test"); c.grid.contentChanged() }
+            case "validlist": // validlist A1:A5 Sì;No
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let r = FormulaText.gridRange(p[0].uppercased()) {
+                    do { try c.grid.book.setValidation(sheet: c.grid.sheet, r, rule: ["type": "list", "formula1": p[1], "inCellDropdown": true, "showErrorMessage": true, "errorStyle": "stop"]); print("VALID ok") }
+                    catch { print("VALID err \(error)") }
+                    c.grid.contentChanged()
+                }
+            case "checkvalid": // checkvalid A1 value
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let r = parseA1(p[0]) { print("CHECK \(c.grid.book.checkValidation(sheet: c.grid.sheet, row: r.row, col: r.col, p[1]).code)") }
+            case "listitems": print("ITEMS \(c.grid.validationListItems()?.joined(separator: ",") ?? "-")")
+            case "font": c.grid.setStyle("font.name", arg)
+            case "tabcolor": c.grid.book.setSheetColor(c.grid.sheet, UInt32(arg, radix: 16) ?? 0); c.reloadTabs()
+            case "summarize": // summarize A1:C10 groupCol valueCol agg
+                let p = arg.split(separator: " ").map(String.init)
+                if p.count == 4, let r = FormulaText.gridRange(p[0].uppercased()), let g = parseA1(p[1] + "1"), let v = parseA1(p[2] + "1"), let a = Int(p[3]) {
+                    if let i = try? c.grid.book.summarize(sheet: c.grid.sheet, r, groupCol: g.col, valueCol: v.col, aggregation: a, name: nil) { c.selectSheetForTesting(i) }
+                }
             case "dialog": // open a dialog for visual checks
                 switch arg {
                 case "formatcells": c.formatCells(nil)

@@ -121,7 +121,7 @@ private let snakeEncoder: JSONEncoder = {
 extension Workbook {
     /// The engine handle. `Workbook.ptr` is private to Engine.swift, so it is read by reflection
     /// (cheap: one stored property). If Engine.swift ever exposes it, use that instead.
-    fileprivate var enginePtr: OpaquePointer? { Mirror(reflecting: self).descendant("ptr") as? OpaquePointer }
+    fileprivate var enginePtr: OpaquePointer? { rawPtr }
 
     func charts(sheet: Int) -> [ChartInfo] {
         guard let p = enginePtr, let json = Workbook.take(foglio_charts_json(p, UInt32(sheet))),

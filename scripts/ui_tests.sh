@@ -59,4 +59,7 @@ run "chart insert" "$CHART_DATA;; chart column A1:B3;; chart list" "CHARTS 1 sel
 run "chart delete key + undo" "$CHART_DATA;; chart line A1:C3;; chart click 0;; key delete;; chart list;; key cmd+z;; chart list" "CHARTS 0" "CHARTS 1"
 run "chart move + properties" "$CHART_DATA;; chart column A1:C3;; chart drag 0 200 0;; chart props 0 title=Totale_mese range=A1:B3;; chart list" "title=Totale mese" "range=A1:B3" "from=G1"
 run "chart save + reopen" "$CHART_DATA;; chart pie A1:B3;; chart line A1:C3;; chart roundtrip /tmp/foglio-ui-chart.xlsx" "REOPENED CHARTS 2 kinds=pie,line titles=Vendite,"
+run "comments" "comment B2 Nota di prova;; key cmd+shift+n;; tab 0;; state" "editing=false"
+run "validation list" "validlist A1:A5 Sì;No;Forse;; select A2;; listitems;; checkvalid A3 Boh;; checkvalid A3 no" "VALID ok" "ITEMS Sì,No,Forse" "CHECK 1" "CHECK 0"
+run "summarize" "input A1=Cliente;; input B1=Importo;; input A2=Rossi;; input B2=10;; input A3=Bianchi;; input B3=5;; input A4=Rossi;; input B4=7;; select A1;; summarize A1:B4 A B 0;; sheets;; print B3" "current=1" "CELL B3 = 17"
 exit $fail

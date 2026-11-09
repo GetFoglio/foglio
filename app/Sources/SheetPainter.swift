@@ -43,10 +43,18 @@ final class SheetPainter {
     private var textColor: NSColor { printing ? .black : .textColor }
     var background: NSColor { printing ? .white : .textBackgroundColor }
 
-    func font(size: Int, bold: Bool, italic: Bool) -> NSFont {
-        let key = size << 2 | (bold ? 1 : 0) | (italic ? 2 : 0)
+    /// Font family name for a cell's font id (nil = system font).
+    var fontNameForId: ((UInt8) -> String?)?
+
+    func font(size: Int, bold: Bool, italic: Bool, fontId: UInt8 = 0) -> NSFont {
+        let key = (Int(fontId) << 12) | size << 2 | (bold ? 1 : 0) | (italic ? 2 : 0)
         if let f = fontCache[key] { return f }
-        var f = NSFont.monospacedDigitSystemFont(ofSize: max(4, CGFloat(size) * fontScale), weight: bold ? .semibold : .regular)
+        let pt = max(4, CGFloat(size) * fontScale)
+        var f = NSFont.monospacedDigitSystemFont(ofSize: pt, weight: bold ? .semibold : .regular)
+        if fontId != 0, let name = fontNameForId?(fontId), let named = NSFont(name: name, size: pt)
+            ?? NSFontManager.shared.font(withFamily: name, traits: [], weight: 5, size: pt) {
+            f = bold ? NSFontManager.shared.convert(named, toHaveTrait: .boldFontMask) : named
+        }
         if italic { f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask) }
         fontCache[key] = f
         return f
@@ -62,6 +70,7 @@ final class SheetPainter {
         k = k << 1 | (c.kind == 3 ? 1 : 0)
         k = k << 1 | (c.wrap ? 1 : 0)
         k = k << 2 | (c.wrap ? Int(min(c.align, 3)) : 0)
+        k = k << 8 | Int(c.fontId)
         // Automatic text colour on a filled cell follows the fill's brightness (readable in dark mode too).
         let onFill: Int = c.fg != VCell.noColor || c.bg == VCell.noColor ? 0 : (SheetPainter.luminance(c.bg) > 0.5 ? 1 : 2)
         k = k << 2 | onFill
@@ -69,7 +78,7 @@ final class SheetPainter {
         if let a = attrCache[k] { return a }
         let auto: NSColor = onFill == 1 ? .black : (onFill == 2 ? .white : textColor)
         let color: NSColor = c.fg == VCell.noColor ? (c.kind == 3 ? .systemRed : auto) : SheetPainter.rgb(c.fg)
-        var a: [NSAttributedString.Key: Any] = [.font: font(size: size, bold: c.bold, italic: c.italic), .foregroundColor: color]
+        var a: [NSAttributedString.Key: Any] = [.font: font(size: size, bold: c.bold, italic: c.italic, fontId: c.fontId), .foregroundColor: color]
         if c.underline { a[.underlineStyle] = NSUnderlineStyle.single.rawValue }
         if c.strike { a[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
         if c.wrap {

@@ -26,7 +26,7 @@ typedef struct {
     uint8_t valign;                // 0 bottom, 1 center, 2 top
     uint8_t border_mask;           // bit0 top, bit1 right, bit2 bottom, bit3 left
     uint8_t border_weight;         // 2 bits per side (top, right, bottom, left from low bits): 1 thin, 2 medium, 3 thick
-    uint8_t _pad;
+    uint8_t font_id;               // 0 = default font; else see foglio_font_name_by_id
     uint32_t border_colors[4];     // top, right, bottom, left: 0xRRGGBB or FOGLIO_NO_COLOR (= automatic)
 } FoglioCell;
 
@@ -40,6 +40,7 @@ typedef struct {
 void foglio_set_locale(const char *locale, const char *language, const char *tz);
 
 FoglioBook *foglio_new(void);
+char *foglio_font_name_by_id(const FoglioBook *b, uint8_t id);
 FoglioBook *foglio_open_xlsx(const char *path, char **err_out);
 int32_t foglio_save_xlsx(FoglioBook *b, const char *path, char **err_out);
 void foglio_free(FoglioBook *b);

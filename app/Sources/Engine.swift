@@ -20,6 +20,7 @@ struct VCell {
     let borderMask: UInt8
     let borderWeight: UInt8          // 2 bits per side
     let borderColors: (UInt32, UInt32, UInt32, UInt32)
+    var fontId: UInt8 = 0
     func borderWeight(side i: Int) -> Int { Int((borderWeight >> (2 * UInt8(i))) & 3) }
     func borderColor(side i: Int) -> UInt32 { [borderColors.0, borderColors.1, borderColors.2, borderColors.3][i] }
     static let noColor: UInt32 = 0xFFFF_FFFF
@@ -98,6 +99,9 @@ final class Workbook {
         version &+= 1
         onChange?()
     }
+    /// For extensions in other files.
+    var rawPtr: OpaquePointer { ptr }
+    func notifyChanged() { changed() }
 
     func saveXLSX(to url: URL) throws {
         var err: UnsafeMutablePointer<CChar>?
@@ -386,7 +390,7 @@ final class Workbook {
                              bold: c.bold != 0, italic: c.italic != 0, fg: c.fg, bg: c.bg,
                              fontSize: c.font_size, underline: c.underline != 0, strike: c.strike != 0, wrap: c.wrap != 0,
                              valign: c.valign, borderMask: c.border_mask, borderWeight: c.border_weight,
-                             borderColors: c.border_colors))
+                             borderColors: c.border_colors, fontId: c.font_id))
         }
         return out
     }

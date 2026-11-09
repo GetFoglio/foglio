@@ -159,6 +159,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     /// View ▸ Show Formulas (⌃`).
     var showFormulas = false { didSet { invalidateData() } }
     private var lastEditorLength = 0
+    private var skipValidation = false
+    private let notePopup = NotePopup()
+    private var noteCell: CellRef?
     private var drag = Drag.none
     private var fillTarget: GridRange?
     private var autoscrollTimer: Timer?
@@ -191,6 +194,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     init(book: Workbook) {
         self.book = book
         super.init(frame: .zero)
+        painter.fontNameForId = { [weak book] id in book?.fontName(id: id) }
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         for s in [vScroller, hScroller] {
@@ -478,6 +482,31 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             accent.setStroke()
             p.stroke()
         }
+        // Comment indicators (red triangle, top-right) and the validation dropdown of the active cell.
+        let vis = GridRange(r0: scrolledRows(g).lowerBound, c0: scrolledCols(g).lowerBound, r1: scrolledRows(g).upperBound, c1: scrolledCols(g).upperBound)
+        var noted = commentCells(vis)
+        if g.fr > 0 { noted.formUnion(commentCells(GridRange(r0: 0, c0: 0, r1: g.fr - 1, c1: vis.c1))) }
+        if g.fc > 0 { noted.formUnion(commentCells(GridRange(r0: 0, c0: 0, r1: vis.r1, c1: g.fc - 1))) }
+        NSColor.systemRed.setFill()
+        for c in noted {
+            let r = cellRect(c.row, c.col, g)
+            let t = NSBezierPath()
+            t.move(to: CGPoint(x: r.maxX - 6, y: r.minY)); t.line(to: CGPoint(x: r.maxX - 1, y: r.minY)); t.line(to: CGPoint(x: r.maxX - 1, y: r.minY + 5)); t.close()
+            t.fill()
+        }
+        if !isEditing, validationListItems() != nil {
+            let b = validationButtonRect(g)
+            NSColor.controlBackgroundColor.setFill()
+            NSBezierPath(roundedRect: b, xRadius: 2, yRadius: 2).fill()
+            NSColor.separatorColor.setStroke()
+            NSBezierPath(roundedRect: b.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2).stroke()
+            if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 8, weight: .bold)) {
+                let tinted = img.copy() as! NSImage
+                tinted.lockFocus(); NSColor.secondaryLabelColor.set(); NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop); tinted.unlockFocus()
+                tinted.draw(in: CGRect(x: b.midX - tinted.size.width / 2, y: b.midY - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
+                            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
+        }
         if let f = filters[sheet] {
             for c in f.range.c0...f.range.c1 {
                 let r = filterButtonRect(c, f, g)
@@ -602,6 +631,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     }
 
     private func notifySelection() {
+        hideNote()
+        showInputMessage()
         delegate?.gridSelectionChanged(self)
         window?.invalidateCursorRects(for: self)
     }
@@ -693,6 +724,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             delegate?.gridRequestsSheet(self, offset: (e.keyCode == 121 || e.keyCode == 124) ? 1 : -1)
             return
         }
+        if opt && e.keyCode == 125, validationListItems() != nil { showValidationList(nil); return }
         switch e.keyCode {
         case 126: cmd ? jump(-1, 0) : move(-1, 0, extend: shift)
         case 125: cmd ? jump(1, 0) : move(1, 0, extend: shift)
@@ -819,6 +851,14 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if isEditing { commitEditing(move: nil) }
         window?.makeFirstResponder(self)
 
+        if validationListItems() != nil && validationButtonRect(g).insetBy(dx: -2, dy: -2).contains(p) {
+            showValidationList(nil)
+            return
+        }
+        if e.modifierFlags.contains(.command), p.x > headerW, p.y > headerH {
+            let c = cellAt(p, g)
+            if let l = book.link(sheet: sheet, row: c.row, col: c.col) { followLink(l.address); return }
+        }
         if let f = filters[sheet], let col = (f.range.c0...f.range.c1).first(where: { filterButtonRect($0, f, g).insetBy(dx: -2, dy: -2).contains(p) }) {
             showFilterPopover(col)
             return
@@ -1139,6 +1179,37 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if !fillSelection && text == book.input(sheet: sheet, row: target.row, col: target.col) {
             if let d = delta { advance(d.0, d.1) } else { notifySelection() }
             return
+        }
+        // Data validation (Excel's Stop / Warning / Information alerts).
+        if !skipValidation {
+            let v = book.checkValidation(sheet: sheet, row: target.row, col: target.col, text)
+            if v.code != 0, let w = window {
+                let a = NSAlert()
+                a.messageText = v.title.isEmpty ? L("Invalid value") : v.title
+                a.informativeText = v.message.isEmpty ? L("The value doesn't match the data validation restrictions defined for this cell.") : v.message
+                a.alertStyle = v.code == 1 ? .critical : (v.code == 2 ? .warning : .informational)
+                switch v.code {
+                case 1: a.addButton(withTitle: L("Retry")); a.addButton(withTitle: L("Cancel"))
+                case 2: a.addButton(withTitle: L("Yes")); a.addButton(withTitle: L("No")); a.addButton(withTitle: L("Cancel"))
+                default: a.addButton(withTitle: L("OK")); a.addButton(withTitle: L("Cancel"))
+                }
+                a.beginSheetModal(for: w) { [weak self] r in
+                    guard let self else { return }
+                    let accept = (v.code == 2 && r == .alertFirstButtonReturn) || (v.code == 3 && r == .alertFirstButtonReturn)
+                    let reedit = (v.code == 1 && r == .alertFirstButtonReturn) || (v.code == 2 && r == .alertSecondButtonReturn)
+                    if accept {
+                        self.skipValidation = true
+                        self.select(target)
+                        self.beginEditing(.edit, initial: text)
+                        self.commitEditing(move: delta, fillSelection: fillSelection)
+                        self.skipValidation = false
+                    } else if reedit {
+                        self.select(target)
+                        self.beginEditing(.edit, initial: text)
+                    }
+                }
+                return
+            }
         }
         if fillSelection && !selection.isSingle {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
@@ -1770,6 +1841,116 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             return true
         default: return true
         }
+    }
+
+    // MARK: Comments, notes popup, validation dropdown
+
+    private var commentCache: [String: Set<CellRef>] = [:]
+    private var commentCacheKey = (-1, -1)
+    private func commentCells(_ r: GridRange) -> Set<CellRef> {
+        if commentCacheKey != (sheet, book.version) { commentCache.removeAll(); commentCacheKey = (sheet, book.version) }
+        let k = "\(r.r0):\(r.c0):\(r.r1):\(r.c1)"
+        if let c = commentCache[k] { return c }
+        let c = book.commentCells(sheet: sheet, rows: r.r0...r.r1, cols: r.c0...r.c1)
+        if commentCache.count > 8 { commentCache.removeAll() }
+        commentCache[k] = c
+        return c
+    }
+
+    private var validationCacheKey: (Int, Int, CellRef)?
+    private var validationCache: [String]?
+    /// Items of the active cell's list validation when it shows an in-cell dropdown.
+    func validationListItems() -> [String]? {
+        if let k = validationCacheKey, k.0 == sheet, k.1 == book.version, k.2 == active { return validationCache }
+        var items: [String]?
+        if let rule = book.validation(sheet: sheet, row: active.row, col: active.col),
+           (rule["type"] as? String) == "list", (rule["inCellDropdown"] as? Bool) ?? true {
+            items = book.validationList(sheet: sheet, row: active.row, col: active.col)
+        }
+        validationCacheKey = (sheet, book.version, active)
+        validationCache = items
+        return items
+    }
+
+    private func validationButtonRect(_ g: Geo) -> CGRect {
+        let r = rangeRect(mergeAt(active, g) ?? GridRange(active, active), g)
+        let h = min(18, r.height)
+        return CGRect(x: r.maxX + 2, y: r.maxY - h, width: 16, height: h)
+    }
+
+    @objc func showValidationList(_ sender: Any?) {
+        guard let items = validationListItems(), !items.isEmpty else { NSSound.beep(); return }
+        let m = NSMenu()
+        let current = book.formatted(sheet: sheet, row: active.row, col: active.col)
+        for it in items {
+            let mi = NSMenuItem(title: it, action: #selector(pickValidationItem(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.state = it == current ? .on : .off
+            m.addItem(mi)
+        }
+        let b = validationButtonRect(geo)
+        m.popUp(positioning: nil, at: NSPoint(x: (b.maxX - 120) * zoom, y: (b.maxY + 2) * zoom), in: self)
+    }
+    @objc private func pickValidationItem(_ sender: NSMenuItem) {
+        book.setInput(sheet: sheet, row: active.row, col: active.col, sender.title)
+        contentChanged()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with e: NSEvent) {
+        let p = logical(e)
+        guard p.x > headerW, p.y > headerH, !isEditing else { hideNote(); return }
+        let c = cellAt(p, geo)
+        guard c != noteCell else { return }
+        hideNote()
+        let note = book.comment(sheet: sheet, row: c.row, col: c.col)
+        let link = book.link(sheet: sheet, row: c.row, col: c.col)
+        guard note != nil || link != nil, let w = window else { return }
+        noteCell = c
+        let r = cellRect(c.row, c.col, geo)
+        let anchor = w.convertToScreen(convert(NSRect(x: r.maxX * zoom + 6, y: r.minY * zoom, width: 1, height: 1), to: nil))
+        var text = ""
+        if let n = note { text = n.author.isEmpty ? n.text : "\(n.author):\n\(n.text)" }
+        if let l = link { text += (text.isEmpty ? "" : "\n\n") + l.address + "\n" + L("⌘-click to follow the link.") }
+        notePopup.show(text, at: NSPoint(x: anchor.minX, y: anchor.maxY), parent: w)
+    }
+    override func mouseExited(with event: NSEvent) { hideNote() }
+    private func hideNote() { noteCell = nil; notePopup.hide() }
+
+    /// Excel's input message: shown under the active cell when its validation rule has one.
+    private func showInputMessage() {
+        guard !isEditing, let rule = book.validation(sheet: sheet, row: active.row, col: active.col),
+              (rule["showInputMessage"] as? Bool) ?? false else { return }
+        let title = rule["promptTitle"] as? String ?? "", msg = rule["prompt"] as? String ?? ""
+        guard !(title.isEmpty && msg.isEmpty), let w = window else { return }
+        let r = cellRect(active.row, active.col, geo)
+        let anchor = w.convertToScreen(convert(NSRect(x: r.minX * zoom + 10, y: r.maxY * zoom + 4, width: 1, height: 1), to: nil))
+        noteCell = active
+        notePopup.show(title.isEmpty ? msg : "\(title)\n\(msg)", at: NSPoint(x: anchor.minX, y: anchor.minY), parent: w)
+    }
+
+    /// Web/mail links open in the default app; "#Sheet!A1" or "#Name" jump inside the workbook.
+    func followLink(_ address: String) {
+        if address.hasPrefix("#") {
+            let target = String(address.dropFirst())
+            if let bang = target.lastIndex(of: "!") {
+                let sname = String(target[..<bang]).trimmingCharacters(in: CharacterSet(charactersIn: "'"))
+                if let i = book.sheetNames.firstIndex(of: sname) { sheet = i }
+                if let r = FormulaText.gridRange(String(target[target.index(after: bang)...]).replacingOccurrences(of: "$", with: "").uppercased()) { select(range: r) }
+            } else if let r = FormulaText.gridRange(target.uppercased()) { select(range: r) }
+            delegate?.gridSelectionChanged(self)
+            return
+        }
+        var s = address
+        if !s.contains(":") { s = s.contains("@") ? "mailto:" + s : "https://" + s }
+        // Only web and mail links are opened: file and app URLs from documents are not followed.
+        guard let u = URL(string: s), ["http", "https", "mailto"].contains(u.scheme?.lowercased() ?? "") else { NSSound.beep(); return }
+        NSWorkspace.shared.open(u)
     }
 
     // MARK: AutoFilter

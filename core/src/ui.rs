@@ -69,6 +69,7 @@ pub(crate) fn style_to_info(st: &Style, theme: &Theme) -> StyleInfo {
         border_mask: mask,
         border_weight: weight,
         border_colors: colors,
+        font_id: 0,
     }
 }
 
@@ -112,7 +113,7 @@ pub extern "C" fn foglio_viewport(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i
                 row, col, text_off: off, text_len: s.len() as u32, kind,
                 align: st.align, bold: st.bold, italic: st.italic, fg: st.fg, bg: st.bg,
                 font_size: st.font_size, underline: st.underline, strike: st.strike, wrap: st.wrap,
-                valign: st.valign, border_mask: st.border_mask, border_weight: st.border_weight, _pad: 0,
+                valign: st.valign, border_mask: st.border_mask, border_weight: st.border_weight, font_id: st.font_id,
                 border_colors: st.border_colors,
             });
         }
