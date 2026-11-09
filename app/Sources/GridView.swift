@@ -44,7 +44,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     // Geometry ---------------------------------------------------------------
     /// Engine px -> logical points.
-    private let unit: CGFloat = 0.8
+    /// Engine px -> points: columns 90px -> 81pt (fits a dd/mm/yyyy date), rows 25px -> 20pt.
+    private let colUnit: CGFloat = 0.9
+    private let rowUnit: CGFloat = 0.8
     private struct Geo {
         var cols: Axis
         var rows: Axis
@@ -60,14 +62,14 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private var geo: Geo {
         if let g = geoCache, geoKey == (sheet, book.version), resizePreview == nil { return g }
         let l = book.layout(sheet: sheet)
-        var colOverrides = l.cols.map { ($0.0, $0.2 ? 0 : $0.1 * unit) }
-        var rowOverrides = l.rows.map { ($0.0, $0.2 ? 0 : $0.1 * unit) }
+        var colOverrides = l.cols.map { ($0.0, $0.2 ? 0 : ($0.1 * colUnit).rounded()) }
+        var rowOverrides = l.rows.map { ($0.0, $0.2 ? 0 : ($0.1 * rowUnit).rounded()) }
         if let p = resizePreview {
             if p.isCol { colOverrides.removeAll { $0.0 == p.index }; colOverrides.append((p.index, p.size)) }
             else { rowOverrides.removeAll { $0.0 == p.index }; rowOverrides.append((p.index, p.size)) }
         }
-        let g = Geo(cols: Axis(defaultSize: (l.defaultCol * unit).rounded(), count: Sheet.maxCols, overrides: colOverrides),
-                    rows: Axis(defaultSize: (l.defaultRow * unit).rounded(), count: Sheet.maxRows, overrides: rowOverrides),
+        let g = Geo(cols: Axis(defaultSize: (l.defaultCol * colUnit).rounded(), count: Sheet.maxCols, overrides: colOverrides),
+                    rows: Axis(defaultSize: (l.defaultRow * rowUnit).rounded(), count: Sheet.maxRows, overrides: rowOverrides),
                     fr: l.frozenRows, fc: l.frozenCols, showGrid: l.showGrid, maxRow: l.maxRow, maxCol: l.maxCol,
                     merges: book.merges(sheet: sheet))
         if resizePreview == nil { geoCache = g; geoKey = (sheet, book.version) }
@@ -808,7 +810,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
                 let range = sel.isFullColumns && i >= sel.c0 && i <= sel.c1 ? sel.c0...sel.c1 : i...i
                 resizePreview = nil
                 if p.size == 0 { book.setHidden(sheet: sheet, rows: false, range.lowerBound, range.upperBound, hidden: true) }
-                else { book.setColumnWidth(sheet: sheet, range.lowerBound, range.upperBound, px: p.size / unit) }
+                else { book.setColumnWidth(sheet: sheet, range.lowerBound, range.upperBound, px: p.size / colUnit) }
                 contentChanged()
             }
         case .resizeRow(let i, _, _):
@@ -817,7 +819,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
                 let range = sel.isFullRows && i >= sel.r0 && i <= sel.r1 ? sel.r0...sel.r1 : i...i
                 resizePreview = nil
                 if p.size == 0 { book.setHidden(sheet: sheet, rows: true, range.lowerBound, range.upperBound, hidden: true) }
-                else { book.setRowHeight(sheet: sheet, range.lowerBound, range.upperBound, px: p.size / unit) }
+                else { book.setRowHeight(sheet: sheet, range.lowerBound, range.upperBound, px: p.size / rowUnit) }
                 contentChanged()
             }
         default: break
@@ -956,6 +958,13 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             }
         } else {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
+        }
+        if text.contains("\n") || book.style(sheet: sheet, row: target.row, col: target.col).wrap {
+            if text.contains("\n") && !book.style(sheet: sheet, row: target.row, col: target.col).wrap {
+                // Alt+Return line breaks turn on wrapping, like Excel.
+                book.setStyle(sheet: sheet, GridRange(target, target), path: "alignment.wrap_text", value: "true")
+            }
+            fitRowHeights(target.row...target.row)
         }
         contentChanged()
         if let d = delta { advance(d.0, d.1) } else { notifySelection() }
@@ -1158,7 +1167,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     @objc func columnWidth(_ sender: Any?) {
         let g = geo
-        askNumber(L("Column width"), value: g.cols.size(selection.c0) / unit / 9) { [weak self] v in
+        askNumber(L("Column width"), value: g.cols.size(selection.c0) / colUnit / 9) { [weak self] v in
             guard let self else { return }
             self.book.setColumnWidth(sheet: self.sheet, self.selection.c0, self.selection.c1, px: CGFloat(v) * 9)
             self.contentChanged()
@@ -1166,7 +1175,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     }
     @objc func rowHeight(_ sender: Any?) {
         let g = geo
-        askNumber(L("Row height"), value: g.rows.size(selection.r0) / unit / 1.5625) { [weak self] v in
+        askNumber(L("Row height"), value: g.rows.size(selection.r0) / rowUnit / 1.5625) { [weak self] v in
             guard let self else { return }
             self.book.setRowHeight(sheet: self.sheet, self.selection.r0, self.selection.r1, px: CGFloat(v) * 1.5625)
             self.contentChanged()
@@ -1186,7 +1195,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         }
         for c in cols where c <= g.maxCol {
             let w = max(widths[c] ?? g.cols.defaultSize, 16)
-            book.setColumnWidth(sheet: sheet, c, c, px: w / unit)
+            book.setColumnWidth(sheet: sheet, c, c, px: w / colUnit)
         }
         contentChanged()
     }
@@ -1298,7 +1307,31 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     func setStyle(_ path: String, _ value: String) {
         commitIfEditing()
         book.setStyle(sheet: sheet, selection, path: path, value: value)
+        if path == "alignment.wrap_text" || path == "font.size" { fitRowHeights(selection.r0...min(selection.r1, selection.r0 + 500)) }
         contentChanged()
+    }
+
+    /// Grows rows so wrapped or larger text fits (Excel's automatic row height). Never shrinks below default.
+    func fitRowHeights(_ rows: ClosedRange<Int>) {
+        let g = geo
+        let lastRow = min(rows.upperBound, g.maxRow)
+        guard rows.lowerBound <= lastRow else { return }
+        let cells = book.viewport(sheet: sheet, rows: rows.lowerBound...lastRow, cols: 0...g.maxCol)
+        var need: [Int: CGFloat] = [:]
+        for c in cells where !c.text.isEmpty && (c.wrap || c.fontSize > 11) {
+            let a = painter.attrs(c)
+            let h: CGFloat
+            if c.wrap {
+                h = (c.text as NSString).boundingRect(with: CGSize(width: max(10, g.cols.size(c.col) - 6), height: .greatestFiniteMagnitude),
+                                                      options: [.usesLineFragmentOrigin], attributes: a).height + 4
+            } else {
+                h = (c.text as NSString).size(withAttributes: a).height + 4
+            }
+            need[c.row] = max(need[c.row] ?? 0, h)
+        }
+        for (r, h) in need where h > g.rows.size(r) + 0.5 {
+            book.setRowHeight(sheet: sheet, r, r, px: (h / rowUnit).rounded(.up))
+        }
     }
 
     func setBorder(_ kind: String, style: String = "thin") {

@@ -131,6 +131,10 @@ enum UIScript {
             case "format": c.grid.setStyle("num_fmt", arg)
             case "wrap": c.wrapAction(nil)
             case "width": if let ref = parseA1(arg + "1") { c.grid.book.setColumnWidth(sheet: c.grid.sheet, ref.col, ref.col, px: 200); c.grid.contentChanged() }
+            case "savexlsx":
+                do { try c.grid.book.saveXLSX(to: URL(fileURLWithPath: arg)); print("SAVED", arg) } catch { print("SAVE_ERROR", error) }
+            case "print":
+                if let ref = parseA1(arg) { print("CELL", arg, "=", c.grid.book.formatted(sheet: c.grid.sheet, row: ref.row, col: ref.col), "|", c.grid.book.input(sheet: c.grid.sheet, row: ref.row, col: ref.col)) }
             case "dump":
                 func walk(_ v: NSView, _ depth: Int) {
                     if v is NSButton || v is NSTextField || v is NSPopUpButton {
