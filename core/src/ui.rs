@@ -786,15 +786,20 @@ fn replace_ci(hay: &str, needle: &str, repl: &str) -> Option<String> {
 
 // ---------- formula editing helpers ----------
 
-/// Newline-separated list of every function name the engine knows.
+/// Every function the engine knows, one per line as "LOCALIZED\tENGLISH" for the current language.
 #[no_mangle]
 pub extern "C" fn foglio_function_names() -> *mut c_char {
     guard(ptr::null_mut(), || {
-        let Ok(lang) = ironcalc::base::language::get_language("en") else { return ptr::null_mut() };
-        let mut names: Vec<String> = crate::fnames::all_names(&lang.functions);
-        names.sort();
-        names.dedup();
-        to_c(names.join("\n"))
+        let (_, language, _) = crate::settings();
+        let (Ok(en), Ok(local)) = (ironcalc::base::language::get_language("en"), ironcalc::base::language::get_language(language)) else {
+            return ptr::null_mut();
+        };
+        let en = crate::fnames::all_names(&en.functions);
+        let local = crate::fnames::all_names(&local.functions);
+        let mut pairs: Vec<String> = local.iter().zip(en.iter()).map(|(l, e)| format!("{l}\t{e}")).collect();
+        pairs.sort();
+        pairs.dedup();
+        to_c(pairs.join("\n"))
     })
 }
 

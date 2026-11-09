@@ -1,0 +1,24 @@
+[package]
+name = "foglio_bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone: not part of any other workspace.
+[workspace]
+
+[dependencies]
+ironcalc = "0.9"
+
+[[bin]]
+name = "functions"
+path = "src/bin/functions.rs"
+
+[[bin]]
+name = "perf"
+path = "src/bin/perf.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4

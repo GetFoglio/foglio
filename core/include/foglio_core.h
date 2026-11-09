@@ -35,6 +35,10 @@ typedef struct {
     const uint8_t *text; size_t text_len;
 } FoglioViewport;
 
+// Locale ("en", "en-GB", "it", "de", "es", "fr"), function-name language ("en", "it", "de", "es", "fr"), IANA timezone.
+// Applies to workbooks created or opened afterwards.
+void foglio_set_locale(const char *locale, const char *language, const char *tz);
+
 FoglioBook *foglio_new(void);
 FoglioBook *foglio_open_xlsx(const char *path, char **err_out);
 int32_t foglio_save_xlsx(FoglioBook *b, const char *path, char **err_out);

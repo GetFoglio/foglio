@@ -61,6 +61,7 @@ int32_t foglio_stats(const FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0
 int32_t foglio_find(const FoglioBook *b, uint32_t sheet, int32_t row, int32_t col, const char *query, uint32_t flags, int32_t *out2);
 int32_t foglio_replace_all(FoglioBook *b, uint32_t sheet, const char *query, const char *repl, uint32_t flags);
 
+// "LOCALIZED\tENGLISH" per line, for the current language.
 char *foglio_function_names(void);
 typedef struct { uint8_t kind; uint32_t replace_from; uint32_t arg_index; char *name; } FoglioCompletion;
 int32_t foglio_completion(FoglioBook *b, uint32_t sheet, int32_t row, int32_t col, const char *formula, uint32_t cursor, FoglioCompletion *out);

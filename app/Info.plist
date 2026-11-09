@@ -4,25 +4,82 @@
 <dict>
     <key>CFBundleName</key><string>Foglio</string>
     <key>CFBundleDisplayName</key><string>Foglio</string>
-    <key>CFBundleIdentifier</key><string>org.foglio.prototype</string>
+    <key>CFBundleIdentifier</key><string>org.foglio.app</string>
     <key>CFBundleExecutable</key><string>Foglio</string>
     <key>CFBundleIconFile</key><string>Foglio</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSSupportsAutomaticTermination</key><true/>
+    <key>NSSupportsAutomaticTermination</key><false/>
+    <key>NSSupportsSuddenTermination</key><false/>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-    <key>CFBundleDevelopmentRegion</key><string>it</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array><string>en</string><string>it</string></array>
+    <key>NSHumanReadableCopyright</key><string>© Foglio contributors — MIT OR Apache-2.0. Calculation engine: IronCalc.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
-            <key>CFBundleTypeName</key><string>Cartella di lavoro Excel</string>
+            <key>CFBundleTypeName</key><string>Excel Workbook</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
+            <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
+            <key>LSItemContentTypes</key><array><string>org.openxmlformats.spreadsheetml.sheet</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>CSV Document</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
+            <key>LSItemContentTypes</key><array><string>public.comma-separated-values-text</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>Spreadsheet (read-only formats)</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
             <key>LSItemContentTypes</key>
-            <array><string>org.openxmlformats.spreadsheetml.sheet</string></array>
+            <array>
+                <string>com.microsoft.excel.xls</string>
+                <string>org.foglio.xlsm</string>
+                <string>org.foglio.xlsb</string>
+                <string>org.oasis-open.opendocument.spreadsheet</string>
+                <string>public.tab-separated-values-text</string>
+                <string>public.plain-text</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.foglio.xlsm</string>
+            <key>UTTypeDescription</key><string>Excel Macro-Enabled Workbook</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.zip-archive</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xlsm</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.foglio.xlsb</string>
+            <key>UTTypeDescription</key><string>Excel Binary Workbook</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xlsb</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.oasis-open.opendocument.spreadsheet</string>
+            <key>UTTypeDescription</key><string>OpenDocument Spreadsheet</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.zip-archive</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>ods</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.microsoft.excel.xls</string>
+            <key>UTTypeDescription</key><string>Excel 97-2004 Workbook</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xls</string></array></dict>
         </dict>
     </array>
 </dict>

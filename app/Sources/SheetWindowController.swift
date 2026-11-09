@@ -1,122 +1,256 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// One workbook window: format bar, formula bar, grid, sheet tabs + status.
-final class SheetWindowController: NSWindowController, NSWindowDelegate, GridViewDelegate, NSTextFieldDelegate {
-    let book: Workbook
-    let grid: GridView
-    private let nameBox = NSTextField()
-    private let formulaField = NSTextField()
-    private let tabsStack = NSStackView()
-    private let statusLabel = NSTextField(labelWithString: "")
-    private var tabButtons: [NSButton] = []
-    var onClose: ((SheetWindowController) -> Void)?
+/// Formula bar field: tells the grid when it gains focus so it can become the cell editor.
+final class FormulaBarField: NSTextField {
+    var onFocus: (() -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { DispatchQueue.main.async { self.onFocus?() } }
+        return ok
+    }
+}
 
-    init(book: Workbook) {
-        self.book = book
-        self.grid = GridView(book: book)
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+/// Sheet tab with a context menu and double-click rename.
+final class SheetTab: NSButton {
+    var onDoubleClick: (() -> Void)?
+    var contextMenu: (() -> NSMenu)?
+    override func mouseDown(with e: NSEvent) {
+        if e.clickCount == 2 { onDoubleClick?(); return }
+        super.mouseDown(with: e)
+    }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        performClick(nil)
+        return contextMenu?()
+    }
+}
+
+/// One workbook window: format bar, formula bar, grid, sheet tabs + status bar.
+final class SheetWindowController: NSWindowController, NSWindowDelegate, GridViewDelegate, NSTextFieldDelegate {
+    private(set) var grid: GridView!
+    private let root = NSView()
+    private let nameBox = NSTextField()
+    private let formulaField = FormulaBarField()
+    private let cancelButton = NSButton()
+    private let enterButton = NSButton()
+    private let tabsStack = NSStackView()
+    private let tabsScroll = NSScrollView()
+    private let modeLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let zoomLabel = NSButton()
+    private let zoomSlider = NSSlider()
+    private var boldButton: NSButton!, italicButton: NSButton!, underlineButton: NSButton!, wrapButton: NSButton!
+    private var alignButtons: [NSButton] = []
+    private let fontSizeBox = NSComboBox()
+    private let numberFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let textColorWell = NSColorWell(style: .minimal)
+    private let fillColorWell = NSColorWell(style: .minimal)
+    private var gridConstraints: [NSLayoutConstraint] = []
+    private var formulaBar: NSView!
+    private var bottomBar: NSView!
+
+    var doc: SpreadsheetDocument? { document as? SpreadsheetDocument }
+
+    init(document: SpreadsheetDocument) {
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
                            styleMask: [.titled, .closable, .miniaturizable, .resizable],
                            backing: .buffered, defer: false)
-        win.minSize = NSSize(width: 520, height: 320)
-        win.tabbingMode = .preferred
+        win.minSize = NSSize(width: 600, height: 360)
+        win.tabbingMode = .automatic
+        win.tabbingIdentifier = "FoglioWorkbook"
         super.init(window: win)
         win.delegate = self
-        win.title = book.fileURL?.lastPathComponent ?? "Cartella1"
-        if let url = book.fileURL { win.representedURL = url }
+        shouldCascadeWindows = true
         buildUI(in: win)
-        grid.delegate = self
-        reloadTabs()
-        gridSelectionChanged(grid)
-        win.center()
+        installGrid(for: document.book)
+        windowFrameAutosaveName = "FoglioSheetWindow"
+        if win.frame.origin == .zero { win.center() }
     }
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// (Re)creates the grid for the document's current workbook (after open/revert).
+    func reload() {
+        guard let book = doc?.book, book !== grid?.book else { return }
+        installGrid(for: book)
+    }
+
+    private func installGrid(for book: Workbook) {
+        let old = grid
+        let g = GridView(book: book)
+        g.delegate = self
+        g.translatesAutoresizingMaskIntoConstraints = false
+        if let old { old.removeFromSuperview() }
+        NSLayoutConstraint.deactivate(gridConstraints)
+        root.addSubview(g)
+        gridConstraints = [g.leadingAnchor.constraint(equalTo: root.leadingAnchor), g.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                           g.topAnchor.constraint(equalTo: formulaBar.bottomAnchor), g.bottomAnchor.constraint(equalTo: bottomBar.topAnchor)]
+        NSLayoutConstraint.activate(gridConstraints)
+        grid = g
+        formulaField.delegate = g
+        formulaField.onFocus = { [weak g] in if let g, let f = g.window?.firstResponder as? NSTextView, f.delegate === self.formulaField { g.beginBarEditing(self.formulaField) } }
+        doc?.activeSheet = 0
+        reloadTabs()
+        gridSelectionChanged(g)
+        gridModeChanged(g)
+        window?.makeFirstResponder(g)
+    }
 
     // MARK: - Layout
 
     private func buildUI(in win: NSWindow) {
-        let root = NSView()
         win.contentView = root
-
         let formatBar = makeFormatBar()
-        let formulaBar = makeFormulaBar()
-        let bottom = makeBottomBar()
+        formulaBar = makeFormulaBar()
+        bottomBar = makeBottomBar()
         let sep1 = NSBox(); sep1.boxType = .separator
         let sep2 = NSBox(); sep2.boxType = .separator
-        let sep3 = NSBox(); sep3.boxType = .separator
-
-        let views: [NSView] = [formatBar, sep1, formulaBar, sep2, grid, sep3, bottom]
-        for v in views { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
-        var c: [NSLayoutConstraint] = []
-        var prev: NSLayoutYAxisAnchor = root.safeAreaLayoutGuide.topAnchor
-        for v in views {
-            c += [v.leadingAnchor.constraint(equalTo: root.leadingAnchor), v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                  v.topAnchor.constraint(equalTo: prev)]
-            prev = v.bottomAnchor
+        for v in [formatBar, sep1, formulaBar!, sep2, bottomBar!] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+            NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: root.leadingAnchor), v.trailingAnchor.constraint(equalTo: root.trailingAnchor)])
         }
-        c += [formatBar.heightAnchor.constraint(equalToConstant: 36),
-              formulaBar.heightAnchor.constraint(equalToConstant: 30),
-              bottom.heightAnchor.constraint(equalToConstant: 28),
-              bottom.bottomAnchor.constraint(equalTo: root.bottomAnchor)]
-        NSLayoutConstraint.activate(c)
+        NSLayoutConstraint.activate([
+            formatBar.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            formatBar.heightAnchor.constraint(equalToConstant: 40),
+            sep1.topAnchor.constraint(equalTo: formatBar.bottomAnchor),
+            formulaBar.topAnchor.constraint(equalTo: sep1.bottomAnchor),
+            formulaBar.heightAnchor.constraint(equalToConstant: 32),
+            sep2.topAnchor.constraint(equalTo: formulaBar.bottomAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: 28),
+            bottomBar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
     }
 
-    private func symbolButton(_ symbol: String, _ tip: String, _ action: Selector) -> NSButton {
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tip) ?? NSImage()
+    private func button(_ symbol: String, _ tip: String, _ action: Selector, toggle: Bool = false) -> NSButton {
+        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: L(tip)) ?? NSImage()
         let b = NSButton(image: img, target: self, action: action)
         b.bezelStyle = .accessoryBarAction
-        b.isBordered = true
-        b.showsBorderOnlyWhileMouseInside = true
-        b.toolTip = tip
-        b.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        b.showsBorderOnlyWhileMouseInside = !toggle
+        if toggle { b.setButtonType(.pushOnPushOff) }
+        b.toolTip = L(tip)
+        b.imageScaling = .scaleProportionallyDown
+        b.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        return b
+    }
+
+    private func group(_ views: [NSView], priority: NSStackView.VisibilityPriority = .mustHold) -> NSStackView {
+        let s = NSStackView(views: views)
+        s.spacing = 1
+        s.setHuggingPriority(.required, for: .horizontal)
+        return s
+    }
+
+    private func divider() -> NSView {
+        let b = NSBox(); b.boxType = .separator
+        b.heightAnchor.constraint(equalToConstant: 22).isActive = true
         return b
     }
 
     private func makeFormatBar() -> NSView {
         let bar = NSStackView()
         bar.orientation = .horizontal
-        bar.spacing = 2
-        bar.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
-        let group = { (views: [NSView]) -> NSView in
-            let s = NSStackView(views: views); s.spacing = 1; return s
+        bar.spacing = 6
+        bar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        bar.detachesHiddenViews = true
+
+        fontSizeBox.addItems(withObjectValues: [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72].map { "\($0)" })
+        fontSizeBox.controlSize = .small
+        fontSizeBox.font = .systemFont(ofSize: 11)
+        fontSizeBox.numberOfVisibleItems = 14
+        fontSizeBox.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        fontSizeBox.target = self
+        fontSizeBox.action = #selector(fontSizeChanged(_:))
+        fontSizeBox.toolTip = L("Font Size")
+
+        boldButton = button("bold", "Bold (⌘B)", #selector(boldAction(_:)), toggle: true)
+        italicButton = button("italic", "Italic (⌘I)", #selector(italicAction(_:)), toggle: true)
+        underlineButton = button("underline", "Underline (⌘U)", #selector(underlineAction(_:)), toggle: true)
+        let strike = button("strikethrough", "Strikethrough", #selector(strikeAction(_:)))
+
+        textColorWell.color = .systemRed
+        textColorWell.target = self
+        textColorWell.action = #selector(textColorChanged(_:))
+        textColorWell.toolTip = L("Font Color")
+        fillColorWell.color = NSColor(srgbRed: 1, green: 0.95, blue: 0.6, alpha: 1)
+        fillColorWell.target = self
+        fillColorWell.action = #selector(fillColorChanged(_:))
+        fillColorWell.toolTip = L("Fill Color")
+        let textColorIcon = NSImageView(image: NSImage(systemSymbolName: "character", accessibilityDescription: nil)!)
+        let fillIcon = NSImageView(image: NSImage(systemSymbolName: "paintbrush.fill", accessibilityDescription: nil)!)
+        for i in [textColorIcon, fillIcon] { i.contentTintColor = .secondaryLabelColor }
+        for w in [textColorWell, fillColorWell] { w.widthAnchor.constraint(equalToConstant: 38).isActive = true }
+
+        let borders = NSPopUpButton(frame: .zero, pullsDown: true)
+        borders.bezelStyle = .accessoryBarAction
+        borders.isBordered = false
+        let head = NSMenuItem(); head.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: L("Borders"))
+        borders.menu?.addItem(head)
+        Menus.borderItems().forEach { $0.target = self; borders.menu?.addItem($0) }
+        borders.toolTip = L("Borders")
+        borders.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        alignButtons = [button("text.alignleft", "Align Left", #selector(alignLeft(_:)), toggle: true),
+                        button("text.aligncenter", "Center", #selector(alignCenter(_:)), toggle: true),
+                        button("text.alignright", "Align Right", #selector(alignRight(_:)), toggle: true)]
+        wrapButton = button("text.word.spacing", "Wrap Text", #selector(wrapAction(_:)), toggle: true)
+        let merge = button("rectangle.split.3x1", "Merge & Center", #selector(GridView.mergeAndCenter(_:)))
+        merge.target = nil
+
+        numberFormatPopup.controlSize = .small
+        numberFormatPopup.font = .systemFont(ofSize: 11)
+        NumberFormats.all.forEach { numberFormatPopup.addItem(withTitle: $0.title) }
+        numberFormatPopup.target = self
+        numberFormatPopup.action = #selector(numberFormatPopupChanged(_:))
+        numberFormatPopup.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        numberFormatPopup.toolTip = L("Number Format")
+        let percent = button("percent", "Percentage", #selector(percentAction(_:)))
+        let thousands = button("number", "Number", #selector(thousandsAction(_:)))
+        let incDec = button("increase.indent", "Increase Decimal", #selector(increaseDecimals(_:)))
+        let decDec = button("decrease.indent", "Decrease Decimal", #selector(decreaseDecimals(_:)))
+
+        let sum = NSPopUpButton(frame: .zero, pullsDown: true)
+        sum.bezelStyle = .accessoryBarAction
+        sum.isBordered = false
+        let sumHead = NSMenuItem(); sumHead.image = NSImage(systemSymbolName: "sum", accessibilityDescription: L("AutoSum"))
+        sum.menu?.addItem(sumHead)
+        for (i, f) in ["SUM", "AVERAGE", "COUNT", "MAX", "MIN"].enumerated() {
+            let it = NSMenuItem(title: Workbook.localName(f), action: #selector(autoSumMenu(_:)), keyEquivalent: "")
+            it.tag = i; it.target = self
+            sum.menu?.addItem(it)
         }
-        let divider = { () -> NSView in
-            let b = NSBox(); b.boxType = .separator
-            b.heightAnchor.constraint(equalToConstant: 20).isActive = true
-            return b
+        sum.toolTip = L("AutoSum")
+        sum.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let sortUp = button("arrow.up.arrow.down", "Sort A to Z", #selector(GridView.sortAscending(_:)))
+        sortUp.target = nil
+        let sortDown = button("arrow.down.arrow.up", "Sort Z to A", #selector(GridView.sortDescending(_:)))
+        sortDown.target = nil
+        let freeze = button("snowflake", "Freeze Panes", #selector(GridView.freezePanes(_:)))
+        freeze.target = nil
+
+        let undo = button("arrow.uturn.backward", "Undo (⌘Z)", #selector(GridView.undo(_:)))
+        undo.target = nil
+        let redo = button("arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(GridView.redo(_:)))
+        redo.target = nil
+
+        let groups: [(NSView, NSStackView.VisibilityPriority)] = [
+            (group([undo, redo]), .mustHold),
+            (divider(), .mustHold),
+            (group([fontSizeBox, boldButton, italicButton, underlineButton, strike]), .mustHold),
+            (divider(), .detachOnlyIfNecessary),
+            (group([textColorIcon, textColorWell, fillIcon, fillColorWell, borders]), NSStackView.VisibilityPriority(800)),
+            (divider(), NSStackView.VisibilityPriority(800)),
+            (group(alignButtons + [wrapButton, merge]), NSStackView.VisibilityPriority(900)),
+            (divider(), NSStackView.VisibilityPriority(900)),
+            (group([numberFormatPopup, percent, thousands, incDec, decDec]), NSStackView.VisibilityPriority(700)),
+            (divider(), NSStackView.VisibilityPriority(700)),
+            (group([sum, sortUp, sortDown, freeze]), NSStackView.VisibilityPriority(600)),
+        ]
+        for (v, p) in groups {
+            bar.addView(v, in: .leading)
+            bar.setVisibilityPriority(p, for: v)
         }
-        bar.addArrangedSubview(group([
-            symbolButton("arrow.uturn.backward", "Annulla (⌘Z)", #selector(undoAction)),
-            symbolButton("arrow.uturn.forward", "Ripeti (⇧⌘Z)", #selector(redoAction)),
-        ]))
-        bar.addArrangedSubview(divider())
-        bar.addArrangedSubview(group([
-            symbolButton("bold", "Grassetto (⌘B)", #selector(boldAction)),
-            symbolButton("italic", "Corsivo (⌘I)", #selector(italicAction)),
-            symbolButton("underline", "Sottolineato (⌘U)", #selector(underlineAction)),
-        ]))
-        bar.addArrangedSubview(divider())
-        bar.addArrangedSubview(group([
-            symbolButton("text.alignleft", "Allinea a sinistra", #selector(alignLeft)),
-            symbolButton("text.aligncenter", "Centra", #selector(alignCenter)),
-            symbolButton("text.alignright", "Allinea a destra", #selector(alignRight)),
-        ]))
-        bar.addArrangedSubview(divider())
-        bar.addArrangedSubview(group([
-            symbolButton("paintbrush.fill", "Colore riempimento (giallo)", #selector(fillYellow)),
-            symbolButton("eraser", "Cancella formati", #selector(clearFill)),
-        ]))
-        bar.addArrangedSubview(divider())
-        let fmt = NSPopUpButton(frame: .zero, pullsDown: false)
-        fmt.addItems(withTitles: ["Generale", "Numero", "Valuta", "Percentuale", "Data", "Testo"])
-        fmt.controlSize = .small
-        fmt.target = self
-        fmt.action = #selector(numberFormat(_:))
-        bar.addArrangedSubview(fmt)
-        bar.addArrangedSubview(divider())
-        bar.addArrangedSubview(symbolButton("sum", "Somma automatica", #selector(autoSumAction)))
-        bar.addArrangedSubview(NSView()) // spacer
-        bar.setHuggingPriority(.defaultLow, for: .horizontal)
         return bar
     }
 
@@ -128,193 +262,462 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         nameBox.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         nameBox.alignment = .center
         nameBox.delegate = self
-        nameBox.widthAnchor.constraint(equalToConstant: 90).isActive = true
-        let fx = NSTextField(labelWithString: "fx")
-        fx.font = .systemFont(ofSize: 13, weight: .medium).withTraits(.italic)
-        fx.textColor = .secondaryLabelColor
+        nameBox.toolTip = L("Name Box: type a cell like B12 and press Return")
+        nameBox.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        cancelButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("Cancel"))
+        cancelButton.bezelStyle = .accessoryBarAction
+        cancelButton.target = self; cancelButton.action = #selector(cancelEdit)
+        enterButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: L("Enter"))
+        enterButton.bezelStyle = .accessoryBarAction
+        enterButton.target = self; enterButton.action = #selector(confirmEdit)
+        let fx = NSButton(title: "fx", target: self, action: #selector(insertFunction(_:)))
+        fx.bezelStyle = .accessoryBarAction
+        fx.font = NSFont(descriptor: NSFont.systemFont(ofSize: 13, weight: .medium).fontDescriptor.withSymbolicTraits(.italic), size: 13)
+        fx.toolTip = L("Insert Function")
         formulaField.font = .systemFont(ofSize: 13)
-        formulaField.delegate = self
-        formulaField.placeholderString = ""
         formulaField.cell?.isScrollable = true
         formulaField.cell?.wraps = false
-        bar.addArrangedSubview(nameBox)
-        bar.addArrangedSubview(fx)
-        bar.addArrangedSubview(formulaField)
+        formulaField.placeholderString = ""
+        formulaField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for v in [nameBox, cancelButton, enterButton, fx, formulaField] as [NSView] { bar.addArrangedSubview(v) }
         return bar
     }
 
     private func makeBottomBar() -> NSView {
         let bar = NSStackView()
         bar.orientation = .horizontal
-        bar.spacing = 2
-        bar.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 12)
+        bar.spacing = 4
+        bar.edgeInsets = NSEdgeInsets(top: 2, left: 6, bottom: 2, right: 10)
         tabsStack.orientation = .horizontal
-        tabsStack.spacing = 2
-        let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Nuovo foglio")!,
-                           target: self, action: #selector(addSheet))
+        tabsStack.spacing = 1
+        tabsScroll.documentView = tabsStack
+        tabsScroll.drawsBackground = false
+        tabsScroll.hasHorizontalScroller = false
+        tabsStack.translatesAutoresizingMaskIntoConstraints = false
+        tabsScroll.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tabsStack.leadingAnchor.constraint(equalTo: tabsScroll.contentView.leadingAnchor),
+            tabsStack.topAnchor.constraint(equalTo: tabsScroll.contentView.topAnchor),
+            tabsStack.bottomAnchor.constraint(equalTo: tabsScroll.contentView.bottomAnchor),
+            tabsScroll.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        let wTabs = tabsScroll.widthAnchor.constraint(equalTo: tabsStack.widthAnchor)
+        wTabs.priority = .defaultHigh
+        wTabs.isActive = true
+        tabsScroll.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("New Sheet"))!,
+                           target: self, action: #selector(addSheet(_:)))
         add.bezelStyle = .accessoryBarAction
-        add.toolTip = "Nuovo foglio"
+        add.toolTip = L("New Sheet")
+        modeLabel.font = .systemFont(ofSize: 11)
+        modeLabel.textColor = .secondaryLabelColor
         statusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.alignment = .right
-        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusLabel.lineBreakMode = .byTruncatingHead
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        bar.addArrangedSubview(tabsStack)
-        bar.addArrangedSubview(add)
-        bar.addArrangedSubview(statusLabel)
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        zoomSlider.minValue = 25; zoomSlider.maxValue = 400; zoomSlider.doubleValue = 100
+        zoomSlider.controlSize = .mini
+        zoomSlider.target = self; zoomSlider.action = #selector(zoomSliderChanged(_:))
+        zoomSlider.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        zoomLabel.title = "100%"
+        zoomLabel.bezelStyle = .accessoryBarAction
+        zoomLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        zoomLabel.target = self; zoomLabel.action = #selector(zoomReset)
+        zoomLabel.widthAnchor.constraint(equalToConstant: 46).isActive = true
+
+        for v in [tabsScroll, add, modeLabel, statusLabel, zoomSlider, zoomLabel] as [NSView] { bar.addArrangedSubview(v) }
+        bar.setCustomSpacing(16, after: add)
         return bar
     }
 
     // MARK: - Sheet tabs
 
-    private func reloadTabs() {
-        tabButtons.forEach { $0.removeFromSuperview() }
-        tabButtons = book.sheetNames.enumerated().map { i, name in
-            let b = NSButton(title: name, target: self, action: #selector(selectSheet(_:)))
+    func reloadTabs() {
+        tabsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let names = grid.book.sheetNames
+        for (i, name) in names.enumerated() where !grid.book.isSheetHidden(i) {
+            let b = SheetTab(title: name, target: self, action: #selector(selectSheet(_:)))
             b.bezelStyle = .accessoryBarAction
             b.setButtonType(.pushOnPushOff)
             b.tag = i
             b.state = i == grid.sheet ? .on : .off
             b.font = .systemFont(ofSize: 12, weight: i == grid.sheet ? .semibold : .regular)
-            return b
+            b.onDoubleClick = { [weak self] in self?.renameSheet(nil) }
+            b.contextMenu = { [weak self] in self?.tabMenu() ?? NSMenu() }
+            tabsStack.addArrangedSubview(b)
         }
-        tabButtons.forEach { tabsStack.addArrangedSubview($0) }
     }
 
-    @objc private func selectSheet(_ sender: NSButton) {
-        grid.commitEditing(move: nil)
-        grid.sheet = sender.tag
+    private func tabMenu() -> NSMenu {
+        let m = NSMenu()
+        [Menus.item("Insert Sheet", #selector(addSheet(_:))),
+         Menus.item("Rename…", #selector(renameSheet(_:))),
+         Menus.item("Duplicate", #selector(duplicateSheet(_:))),
+         Menus.item("Delete", #selector(deleteSheet(_:))),
+         .separator(),
+         Menus.item("Move Left", #selector(moveSheetLeft(_:))),
+         Menus.item("Move Right", #selector(moveSheetRight(_:))),
+         .separator(),
+         Menus.item("Hide", #selector(hideSheet(_:))),
+         Menus.item("Unhide…", #selector(unhideSheet(_:)))].forEach { $0.target = self; m.addItem($0) }
+        return m
+    }
+
+    private func switchTo(sheet i: Int) {
+        if grid.isEditing && !grid.isPointing { grid.commitEditing(move: nil) }
+        grid.sheet = i
+        doc?.activeSheet = i
         reloadTabs()
     }
 
-    @objc private func addSheet() {
-        book.addSheet()
-        grid.sheet = book.sheetNames.count - 1
-        reloadTabs()
+    @objc private func selectSheet(_ sender: NSButton) { switchTo(sheet: sender.tag) }
+
+    @objc func addSheet(_ sender: Any?) {
+        grid.book.addSheet()
+        switchTo(sheet: grid.book.sheetNames.count - 1)
+        changed()
+    }
+
+    @objc func renameSheet(_ sender: Any?) {
+        let current = grid.book.sheetNames[safe: grid.sheet] ?? ""
+        prompt(L("Rename Sheet"), value: current) { [weak self] name in
+            guard let self, !name.isEmpty, name != current else { return }
+            if !self.grid.book.renameSheet(self.grid.sheet, to: name) {
+                self.alert(L("Invalid sheet name"), L("The name may already exist or contain characters like : \\ / ? * [ ]."))
+            }
+            self.reloadTabs(); self.changed()
+        }
+    }
+
+    @objc func duplicateSheet(_ sender: Any?) {
+        grid.book.duplicateSheet(grid.sheet)
+        switchTo(sheet: grid.sheet + 1)
+        changed()
+    }
+
+    @objc func deleteSheet(_ sender: Any?) {
+        guard grid.book.sheetNames.count > 1, let w = window else { NSSound.beep(); return }
+        let a = NSAlert()
+        a.messageText = String(format: L("Delete sheet “%@”?"), grid.book.sheetNames[safe: grid.sheet] ?? "")
+        a.informativeText = L("You can undo this with ⌘Z.")
+        a.addButton(withTitle: L("Delete"))
+        a.addButton(withTitle: L("Cancel"))
+        a.buttons.first?.hasDestructiveAction = true
+        a.beginSheetModal(for: w) { [weak self] r in
+            guard let self, r == .alertFirstButtonReturn else { return }
+            let s = self.grid.sheet
+            self.grid.book.deleteSheet(s)
+            self.switchTo(sheet: max(0, s - 1))
+            self.changed()
+        }
+    }
+
+    @objc func moveSheetLeft(_ sender: Any?) {
+        guard grid.sheet > 0 else { return }
+        grid.book.moveSheet(grid.sheet, to: grid.sheet - 1); switchTo(sheet: grid.sheet - 1); changed()
+    }
+    @objc func moveSheetRight(_ sender: Any?) {
+        guard grid.sheet < grid.book.sheetNames.count - 1 else { return }
+        grid.book.moveSheet(grid.sheet, to: grid.sheet + 1); switchTo(sheet: grid.sheet + 1); changed()
+    }
+    @objc func hideSheet(_ sender: Any?) {
+        let visible = (0..<grid.book.sheetNames.count).filter { !grid.book.isSheetHidden($0) }
+        guard visible.count > 1 else { NSSound.beep(); return }
+        let s = grid.sheet
+        grid.book.setSheetHidden(s, true)
+        switchTo(sheet: visible.first { $0 != s } ?? 0)
+        changed()
+    }
+    @objc func unhideSheet(_ sender: Any?) {
+        let hidden = (0..<grid.book.sheetNames.count).filter { grid.book.isSheetHidden($0) }
+        guard let w = window, !hidden.isEmpty else { NSSound.beep(); return }
+        let a = NSAlert()
+        a.messageText = L("Unhide Sheet")
+        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+        hidden.forEach { pop.addItem(withTitle: grid.book.sheetNames[$0]) }
+        a.accessoryView = pop
+        a.addButton(withTitle: L("OK")); a.addButton(withTitle: L("Cancel"))
+        a.beginSheetModal(for: w) { [weak self] r in
+            guard let self, r == .alertFirstButtonReturn else { return }
+            let s = hidden[pop.indexOfSelectedItem]
+            self.grid.book.setSheetHidden(s, false)
+            self.switchTo(sheet: s)
+            self.changed()
+        }
     }
 
     // MARK: - GridViewDelegate
 
     func gridSelectionChanged(_ g: GridView) {
-        nameBox.stringValue = g.selection.isSingle ? g.selection.a1 : "\(g.selection.r1 - g.selection.r0 + 1)R × \(g.selection.c1 - g.selection.c0 + 1)C"
+        let s = g.selection
+        nameBox.stringValue = s.isSingle || s == g.book.merges(sheet: g.sheet).first(where: { $0.contains(g.active) })
+            ? "\(columnName(g.active.col))\(g.active.row + 1)" : s.a1
         if !g.isEditing {
-            formulaField.stringValue = book.input(sheet: g.sheet, row: g.anchor.row, col: g.anchor.col)
+            formulaField.stringValue = g.book.input(sheet: g.sheet, row: g.active.row, col: g.active.col)
         }
+        updateFormatState()
         updateStatus()
+        if g.sheet != doc?.activeSheet { doc?.activeSheet = g.sheet; reloadTabs() }
     }
 
     func gridEditingTextChanged(_ g: GridView, text: String) {
-        formulaField.stringValue = text
+        if formulaField.currentEditor() == nil { formulaField.stringValue = text }
     }
 
-    func gridContentChanged(_ g: GridView) {
-        window?.isDocumentEdited = true
+    func gridContentChanged(_ g: GridView) { changed() }
+
+    func gridModeChanged(_ g: GridView) {
+        cancelButton.isEnabled = g.isEditing
+        enterButton.isEnabled = g.isEditing
+        modeLabel.stringValue = g.isEditing ? (g.isPointing ? L("Point") : (g.editMode == .enter ? L("Enter") : L("Edit"))) : L("Ready")
+        if !g.isEditing { formulaField.stringValue = g.book.input(sheet: g.sheet, row: g.active.row, col: g.active.col) }
+    }
+
+    private func changed() {
+        doc?.updateChangeCount(.changeDone)
         updateStatus()
     }
 
-    /// Excel's status bar: Media / Conteggio / Somma of the selection.
+    private func updateFormatState() {
+        let st = grid.book.style(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)
+        boldButton.state = st.bold ? .on : .off
+        italicButton.state = st.italic ? .on : .off
+        underlineButton.state = st.underline ? .on : .off
+        wrapButton.state = st.wrap ? .on : .off
+        for (i, b) in alignButtons.enumerated() { b.state = Int(st.align) == i + 1 ? .on : .off }
+        fontSizeBox.stringValue = "\(st.fontSize)"
+        let codes = NumberFormats.all.map(\.code)
+        if let i = codes.firstIndex(where: { $0.lowercased() == st.numFmt.lowercased() }) {
+            numberFormatPopup.selectItem(at: i)
+        } else {
+            numberFormatPopup.selectItem(at: -1)
+            numberFormatPopup.setTitle(st.numFmt.lowercased() == "general" ? L("General") : L("Custom"))
+        }
+    }
+
+    /// Excel's status bar: Average / Count / Sum of the selection.
     private func updateStatus() {
         let s = grid.selection
         guard !s.isSingle else { statusLabel.stringValue = ""; return }
-        let cells = book.viewport(sheet: grid.sheet, rows: s.r0...min(s.r1, s.r0 + 200_000), cols: s.c0...s.c1)
-        var sum = 0.0, nums = 0, count = 0
-        for c in cells where !c.text.isEmpty {
-            count += 1
-            if c.kind == 1, let v = Double(c.text.replacingOccurrences(of: ",", with: "")) { sum += v; nums += 1 }
-        }
-        guard count > 0 else { statusLabel.stringValue = ""; return }
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 4
+        let st = grid.book.stats(sheet: grid.sheet, s)
+        guard st.count > 0 else { statusLabel.stringValue = ""; return }
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 4
         var parts: [String] = []
-        if nums > 0 { parts.append("Media: \(f.string(from: NSNumber(value: sum / Double(nums))) ?? "")") }
-        parts.append("Conteggio: \(count)")
-        if nums > 0 { parts.append("Somma: \(f.string(from: NSNumber(value: sum)) ?? "")") }
-        statusLabel.stringValue = parts.joined(separator: "     ")
+        if st.numeric > 0 { parts.append("\(L("Average")): \(f.string(from: NSNumber(value: st.sum / Double(st.numeric))) ?? "")") }
+        parts.append("\(L("Count")): \(st.count)")
+        if st.numeric > 1 {
+            parts.append("\(L("Min")): \(f.string(from: NSNumber(value: st.min)) ?? "")")
+            parts.append("\(L("Max")): \(f.string(from: NSNumber(value: st.max)) ?? "")")
+        }
+        if st.numeric > 0 { parts.append("\(L("Sum")): \(f.string(from: NSNumber(value: st.sum)) ?? "")") }
+        statusLabel.stringValue = parts.joined(separator: "    ")
     }
 
-    // MARK: - Formula bar & name box
+    // MARK: - Name box / formula bar buttons
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
-        if control === formulaField {
-            if sel == #selector(NSResponder.insertNewline(_:)) {
-                commitFormulaBar(); grid.select(CellRef(row: grid.anchor.row + 1, col: grid.anchor.col)); return true
+        guard control === nameBox else { return false }
+        if sel == #selector(NSResponder.insertNewline(_:)) {
+            let text = nameBox.stringValue.trimmingCharacters(in: .whitespaces)
+            var sheetIndex = grid.sheet
+            var refText = text
+            if let bang = text.lastIndex(of: "!") {
+                let name = String(text[..<bang]).trimmingCharacters(in: CharacterSet(charactersIn: "'"))
+                if let i = grid.book.sheetNames.firstIndex(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { sheetIndex = i }
+                refText = String(text[text.index(after: bang)...])
             }
-            if sel == #selector(NSResponder.cancelOperation(_:)) {
-                grid.cancelEditing(); gridSelectionChanged(grid); window?.makeFirstResponder(grid); return true
+            if let r = FormulaText.gridRange(refText.uppercased()) {
+                if sheetIndex != grid.sheet { switchTo(sheet: sheetIndex) }
+                grid.select(range: r)
+            } else {
+                NSSound.beep()
             }
-        } else if control === nameBox, sel == #selector(NSResponder.insertNewline(_:)) {
-            if let ref = parseA1(nameBox.stringValue) { grid.select(ref) }
+            window?.makeFirstResponder(grid)
+            return true
+        }
+        if sel == #selector(NSResponder.cancelOperation(_:)) {
+            gridSelectionChanged(grid)
             window?.makeFirstResponder(grid)
             return true
         }
         return false
     }
 
-    func controlTextDidChange(_ n: Notification) {
-        if (n.object as? NSTextField) === formulaField { grid.setEditorText(formulaField.stringValue) }
+    @objc private func cancelEdit() { grid.cancelEditing() }
+    @objc private func confirmEdit() { grid.commitEditing(move: nil) }
+
+    @objc func goTo(_ sender: Any?) {
+        window?.makeFirstResponder(nameBox)
+        nameBox.currentEditor()?.selectAll(nil)
     }
 
-    private func commitFormulaBar() {
-        if grid.isEditing { grid.cancelEditing() }
-        book.setInput(sheet: grid.sheet, row: grid.anchor.row, col: grid.anchor.col, formulaField.stringValue)
+    @objc func insertFunction(_ sender: Any?) {
+        if !grid.isEditing { grid.beginEditing(.edit, initial: "=") }
+        FunctionBrowser.shared.show(relativeTo: window) { [weak self] name in
+            guard let self, let tv = self.window?.firstResponder as? NSTextView else { return }
+            tv.insertText(name + "(", replacementRange: tv.selectedRange())
+        }
+    }
+
+    // MARK: - Formatting actions
+
+    @objc func boldAction(_ sender: Any?) { grid.toggleStyle("font.b") }
+    @objc func italicAction(_ sender: Any?) { grid.toggleStyle("font.i") }
+    @objc func underlineAction(_ sender: Any?) { grid.toggleStyle("font.u") }
+    @objc func strikeAction(_ sender: Any?) { grid.toggleStyle("font.strike") }
+    @objc func wrapAction(_ sender: Any?) { grid.toggleStyle("alignment.wrap_text") }
+    @objc func alignLeft(_ sender: Any?) { toggleAlign("left", 1) }
+    @objc func alignCenter(_ sender: Any?) { toggleAlign("center", 2) }
+    @objc func alignRight(_ sender: Any?) { toggleAlign("right", 3) }
+    @objc func valignTop(_ sender: Any?) { grid.setStyle("alignment.vertical", "top") }
+    @objc func valignMiddle(_ sender: Any?) { grid.setStyle("alignment.vertical", "center") }
+    @objc func valignBottom(_ sender: Any?) { grid.setStyle("alignment.vertical", "bottom") }
+
+    private func toggleAlign(_ v: String, _ code: UInt8) {
+        let st = grid.book.style(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)
+        grid.setStyle("alignment.horizontal", st.align == code ? "general" : v)
+    }
+
+    @objc private func fontSizeChanged(_ sender: NSComboBox) {
+        guard let v = Int(sender.stringValue), v >= 1, v <= 409 else { updateFormatState(); return }
+        grid.setStyle("font.size", "\(v)")
+        window?.makeFirstResponder(grid)
+    }
+
+    private func hex(_ c: NSColor) -> String {
+        let s = c.usingColorSpace(.sRGB) ?? c
+        return String(format: "#%02X%02X%02X", Int(s.redComponent * 255), Int(s.greenComponent * 255), Int(s.blueComponent * 255))
+    }
+    @objc private func textColorChanged(_ sender: NSColorWell) { grid.setStyle("font.color", hex(sender.color)) }
+    @objc private func fillColorChanged(_ sender: NSColorWell) { grid.setStyle("fill.fg_color", hex(sender.color)) }
+
+    @objc func applyNumberFormat(_ sender: NSMenuItem) {
+        guard let f = NumberFormats.all[safe: sender.tag] else { return }
+        grid.setStyle("num_fmt", f.code)
+    }
+    @objc private func numberFormatPopupChanged(_ sender: NSPopUpButton) {
+        guard let f = NumberFormats.all[safe: sender.indexOfSelectedItem] else { return }
+        grid.setStyle("num_fmt", f.code)
+        window?.makeFirstResponder(grid)
+    }
+    @objc private func percentAction(_ sender: Any?) { grid.setStyle("num_fmt", "0%") }
+    @objc private func thousandsAction(_ sender: Any?) { grid.setStyle("num_fmt", "#,##0.00") }
+    @objc func increaseDecimals(_ sender: Any?) { adjustDecimals(1) }
+    @objc func decreaseDecimals(_ sender: Any?) { adjustDecimals(-1) }
+    private func adjustDecimals(_ d: Int) {
+        var code = grid.book.style(sheet: grid.sheet, row: grid.active.row, col: grid.active.col).numFmt
+        if code.lowercased() == "general" {
+            // Start from the decimals currently shown, like Excel.
+            let text = grid.book.formatted(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)
+            let decimals = text.split(separator: ".").dropFirst().first?.count ?? 0
+            code = decimals > 0 ? "0." + String(repeating: "0", count: decimals) : "0"
+        }
+        grid.setStyle("num_fmt", NumberFormats.adjustDecimals(code, by: d))
+    }
+
+    @objc func applyBorder(_ sender: NSMenuItem) {
+        guard let b = Borders.all[safe: sender.tag] else { return }
+        grid.setBorder(b.kind, style: b.style)
+    }
+
+    @objc func autoSumMenu(_ sender: Any?) {
+        let fns = ["SUM", "AVERAGE", "COUNT", "MAX", "MIN"]
+        let tag = (sender as? NSMenuItem)?.tag ?? 0
+        window?.makeFirstResponder(grid)
+        grid.autoSum(fns[safe: tag] ?? "SUM")
+    }
+
+    @objc func insertDate(_ sender: Any?) {
+        let f = DateFormatter(); f.dateFormat = FormulaLocale.current.datePattern
+        grid.book.setInput(sheet: grid.sheet, row: grid.active.row, col: grid.active.col, f.string(from: Date()))
         grid.contentChanged()
-        window?.makeFirstResponder(grid)
+    }
+    @objc func insertTime(_ sender: Any?) {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        grid.book.setInput(sheet: grid.sheet, row: grid.active.row, col: grid.active.col, f.string(from: Date()))
+        grid.contentChanged()
     }
 
-    // MARK: - Format actions
+    // MARK: - Zoom
 
-    @objc func undoAction() { grid.undo(nil) }
-    @objc func redoAction() { grid.redo(nil) }
-    @objc func boldAction() { grid.toggleStyle("font.b") }
-    @objc func italicAction() { grid.toggleStyle("font.i") }
-    @objc func underlineAction() { grid.toggleStyle("font.u") }
-    @objc private func alignLeft() { grid.setStyle("alignment.horizontal", "left") }
-    @objc private func alignCenter() { grid.setStyle("alignment.horizontal", "center") }
-    @objc private func alignRight() { grid.setStyle("alignment.horizontal", "right") }
-    @objc private func fillYellow() { grid.setStyle("fill.fg_color", "#FFF2CC") }
-    @objc private func clearFill() { grid.setStyle("fill.fg_color", "") }
-    @objc private func autoSumAction() { window?.makeFirstResponder(grid); grid.autoSum() }
-    @objc private func numberFormat(_ sender: NSPopUpButton) {
-        let codes = ["general", "#,##0.00", "€ #,##0.00", "0.00%", "dd/mm/yyyy", "@"]
-        grid.setStyle("num_fmt", codes[sender.indexOfSelectedItem])
-        window?.makeFirstResponder(grid)
+    @objc private func zoomSliderChanged(_ s: NSSlider) {
+        grid.zoom = CGFloat((s.doubleValue / 5).rounded() * 5) / 100
+        zoomLabel.title = "\(Int((grid.zoom * 100).rounded()))%"
+    }
+    @objc private func zoomReset() { grid.zoom = 1; syncZoom() }
+    func syncZoom() {
+        zoomSlider.doubleValue = Double(grid.zoom * 100)
+        zoomLabel.title = "\(Int((grid.zoom * 100).rounded()))%"
     }
 
-    // MARK: - Saving
+    // MARK: - Find
 
-    @objc func saveDocument(_ sender: Any?) {
-        if let url = book.fileURL { write(to: url) } else { saveDocumentAs(sender) }
-    }
+    @objc func showFind(_ sender: Any?) { FindPanel.shared.show(replace: false) }
+    @objc func showReplace(_ sender: Any?) { FindPanel.shared.show(replace: true) }
+    @objc func findNext(_ sender: Any?) { _ = grid.find(FindPanel.shared.query, flags: FindPanel.shared.flags) }
+    @objc func findPrevious(_ sender: Any?) { _ = grid.find(FindPanel.shared.query, flags: FindPanel.shared.flags | 8) }
 
-    @objc func saveDocumentAs(_ sender: Any?) {
-        guard let win = window else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .data]
-        panel.nameFieldStringValue = (book.fileURL?.deletingPathExtension().lastPathComponent ?? "Cartella1") + ".xlsx"
-        panel.beginSheetModal(for: win) { [weak self] r in
-            if r == .OK, let url = panel.url { self?.write(to: url) }
+    // MARK: - Export
+
+    @objc func exportCSV(_ sender: Any?) {
+        guard let w = window else { return }
+        let p = NSSavePanel()
+        p.allowedContentTypes = [.commaSeparatedText]
+        let base = doc?.displayName.replacingOccurrences(of: ".xlsx", with: "") ?? "Foglio"
+        p.nameFieldStringValue = "\(base) - \(grid.book.sheetNames[safe: grid.sheet] ?? "").csv"
+        p.beginSheetModal(for: w) { [weak self] r in
+            guard let self, r == .OK, let url = p.url else { return }
+            do { try self.grid.book.saveCSV(sheet: self.grid.sheet, to: url) } catch { self.alert(L("Export failed"), error.localizedDescription) }
         }
     }
 
-    private func write(to url: URL) {
-        grid.commitEditing(move: nil)
-        do {
-            try book.save(to: url)
-            window?.title = url.lastPathComponent
-            window?.representedURL = url
-            window?.isDocumentEdited = false
-        } catch {
-            let a = NSAlert(error: error as NSError)
-            a.messageText = "Impossibile salvare"
-            a.informativeText = "\(error)"
-            a.beginSheetModal(for: window!)
+    @objc func exportPDF(_ sender: Any?) {
+        guard let w = window, let doc else { return }
+        let p = NSSavePanel()
+        p.allowedContentTypes = [.pdf]
+        p.nameFieldStringValue = (doc.displayName as NSString).deletingPathExtension + ".pdf"
+        p.beginSheetModal(for: w) { r in
+            guard r == .OK, let url = p.url else { return }
+            do {
+                let op = try doc.printOperation(withSettings: [:])
+                op.printInfo.jobDisposition = .save
+                op.printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+                op.showsPrintPanel = false
+                op.showsProgressPanel = false
+                op.run()
+            } catch {
+                self.alert(L("Export failed"), error.localizedDescription)
+            }
         }
     }
 
-    func windowWillClose(_ notification: Notification) { onClose?(self) }
-}
+    // MARK: - Helpers
 
-private extension NSFont {
-    func withTraits(_ t: NSFontDescriptor.SymbolicTraits) -> NSFont {
-        NSFont(descriptor: fontDescriptor.withSymbolicTraits(t), size: pointSize) ?? self
+    private func prompt(_ title: String, value: String, _ done: @escaping (String) -> Void) {
+        guard let w = window else { return }
+        let a = NSAlert()
+        a.messageText = title
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        f.stringValue = value
+        a.accessoryView = f
+        a.addButton(withTitle: L("OK")); a.addButton(withTitle: L("Cancel"))
+        a.window.initialFirstResponder = f
+        a.beginSheetModal(for: w) { r in if r == .alertFirstButtonReturn { done(f.stringValue.trimmingCharacters(in: .whitespaces)) } }
     }
+
+    private func alert(_ title: String, _ text: String) {
+        guard let w = window else { return }
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.beginSheetModal(for: w)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) { syncZoom() }
 }

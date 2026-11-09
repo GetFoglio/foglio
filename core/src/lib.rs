@@ -13,6 +13,33 @@ use ironcalc::base::{Model, UserModel};
 pub(crate) const NO_COLOR: u32 = 0xFFFF_FFFF;
 
 mod ui;
+
+// ---------- locale settings (shared by new and opened workbooks) ----------
+
+static SETTINGS: std::sync::Mutex<(&'static str, &'static str, &'static str)> = std::sync::Mutex::new(("en", "en", "UTC"));
+
+/// (locale, language, timezone) used for new and opened workbooks.
+pub(crate) fn settings() -> (&'static str, &'static str, &'static str) {
+    *SETTINGS.lock().unwrap()
+}
+
+/// Sets locale ("en", "en-GB", "it", "de", "es", "fr"), function-name language ("en", "it", "de", "es", "fr")
+/// and IANA timezone. Unknown values fall back to English/UTC. Call before creating or opening workbooks.
+#[no_mangle]
+pub unsafe extern "C" fn foglio_set_locale(locale: *const c_char, language: *const c_char, tz: *const c_char) {
+    let pick = |v: Option<&str>, allowed: &[&'static str], default: &'static str| -> &'static str {
+        v.and_then(|v| allowed.iter().find(|a| **a == v).copied()).unwrap_or(default)
+    };
+    let locale = pick(cstr(locale), &["en", "en-GB", "it", "de", "es", "fr"], "en");
+    let language = pick(cstr(language), &["en", "it", "de", "es", "fr"], "en");
+    let tz_s = cstr(tz).unwrap_or("UTC");
+    let tz: &'static str = if ironcalc::base::get_all_timezones().iter().any(|t| t == tz_s) {
+        Box::leak(tz_s.to_string().into_boxed_str())
+    } else {
+        "UTC"
+    };
+    *SETTINGS.lock().unwrap() = (locale, language, tz);
+}
 mod fnames;
 pub mod io;
 
@@ -169,7 +196,8 @@ impl FoglioBook {
 
 #[no_mangle]
 pub extern "C" fn foglio_new() -> *mut FoglioBook {
-    guard(ptr::null_mut(), || match UserModel::new_empty("Workbook1", "en", "UTC", "en") {
+    let (locale, language, tz) = settings();
+    guard(ptr::null_mut(), || match UserModel::new_empty("Workbook1", locale, tz, language) {
         Ok(m) => FoglioBook::wrap(m),
         Err(_) => ptr::null_mut(),
     })
