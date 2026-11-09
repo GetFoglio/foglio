@@ -1,4 +1,8 @@
-# IronCalc 0.9.1 performance for Foglio
+# IronCalc performance for Foglio
+
+Foglio uses a patched fork of IronCalc 0.9.1 in `third_party/` (see
+`third_party/README.md` for every change). This document has the measurements
+before and after the fork's performance work, and what is left.
 
 Measured with `bench/` on this Mac (Apple Silicon, release build, single thread):
 
@@ -7,6 +11,7 @@ cd bench
 cargo run --release --bin perf                 # all sizes, each in its own child process
 cargo run --release --bin perf -- 100000       # one size (add `novlookup` to drop column F)
 cargo run --release --bin perf -- lookups      # cost per lookup function
+IRONCALC_CHECK_INCREMENTAL=1 cargo run --release --bin perf -- 10000   # verify each edit
 ```
 
 ## Workbook
@@ -17,143 +22,181 @@ N rows of
 and — in the "+VLOOKUP" variant — column F on rows 1..1000:
 `=VLOOKUP(key,$A$1:$B$N,2,FALSE)` with scattered keys (plus `SUM(F1:F1000)`).
 
-* **build** = 5N (or 5N+1000) calls to `Model::set_user_input` (no evaluation)
-* **evaluate** = `Model::evaluate()` (first / second run)
-* **edit** = one `UserModel::set_user_input(0, N/2, 1, "1000")` — what the user waits for after
-  pressing Enter, including the automatic full re-evaluation (median of 5; 1 run for the
-  slow VLOOKUP sizes). "edit, isolated cell" = typing into Z1, a cell nothing reads.
-  With `pause_evaluation()` the same call takes ≈ 1 µs, i.e. the edit itself is free —
-  **100 % of the latency is the full recalculation.**
-* **RSS** = `getrusage` `ru_maxrss` in the child process for that N: after the first evaluate,
-  and the peak of the whole run (which includes save + load).
+* **evaluate** = `Model::evaluate()`, a full recalculation.
+* **edit** = `UserModel::set_user_input(0, N/2+i, 1, "…")` — what the user waits
+  for after pressing Enter, evaluation included (median of 5). It changes a
+  cell that 3 row formulas, the summary row and (in the +VLOOKUP variant) all
+  1000 VLOOKUPs depend on: the VLOOKUP table contains it.
+* **isolated edit** = typing into Z1, a cell nothing reads.
+* **formula edit** = replacing `D(N/2)` with a new formula; **undo** = undo of
+  a value edit.
+* **first edit** = the first edit after `UserModel::from_model` (a full
+  evaluation: the UserModel does not know what was done to the model
+  before); **2nd edit** = the next one, which also builds the dependency index.
+* **RSS** = `getrusage` `ru_maxrss` (peak so far) after the first evaluation,
+  and after the edits (includes the dependency index).
 
-## Results
+## Results: before → after
 
-| N rows (formula cells) | build | evaluate | **edit (felt)** | edit, isolated cell | save xlsx | xlsx size | load xlsx | eval after load | RSS after eval | peak RSS (incl. save/load) |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 10k (30k) | 68 ms | 7.9 ms | **7.1 ms** | 7.0 ms | 44 ms | 0.42 MB | 77 ms | 7.5 ms | 16 MB | 32 MB |
-| 100k (300k) | 681 ms | 99 ms | **91 ms** | 93 ms | 477 ms | 4.1 MB | 789 ms | 95 ms | 79 MB | 243 MB |
-| 300k (900k) | 2.07 s | 291 ms | **272 ms** | 276 ms | 1.43 s | 12.4 MB | 2.34 s | 281 ms | 202 MB | 592 MB |
-| 10k + 1000 VLOOKUP | 69 ms | 1.65 s | **1.64 s** | 1.70 s | 46 ms | 0.43 MB | 85 ms | 1.87 s | 17 MB | 30 MB |
-| 100k + 1000 VLOOKUP | 980 ms | 18.7 s | **19.6 s** | 18.8 s | 545 ms | 4.1 MB | 795 ms | 24.8 s | 79 MB | 189 MB |
-| 300k + 1000 VLOOKUP | 3.55 s | 62.0 s | **54.1 s** | 54.9 s | 1.48 s | 12.4 MB | 2.97 s | 61.9 s | 203 MB | 552 MB |
+Before = IronCalc 0.9.1 as published; after = Foglio's fork (this repository).
 
-The internal binary format (`Model::to_bytes`, bitcode) is ~100× faster than xlsx to
-write: 9 ms / 12 MB at 300k rows (vs 1.43 s for xlsx).
+| N rows (formula cells) | evaluate | **edit (felt)** | isolated edit | formula edit, undo | after: first / 2nd edit | after: RSS after eval → after edits |
+|---|---|---|---|---|---|---|
+| 10k (30k) | 7.9 → **4.9 ms** | 7.1 → **1.0 ms** | 7.1 → 0.001 ms | 7 → 0.9 ms | 4.0 / 2.5 ms | 16 → 18 MB |
+| 100k (300k) | 88 → **55 ms** | 82 → **12 ms** | 84 → 0.001 ms | 82 → 8 ms | 51 / 30 ms | 79 → 102 MB |
+| 300k (900k) | 287 → **183 ms** | 280 → **36 ms** | 277 → 0.002 ms | 280 → 25 ms | 186 / 98 ms | 203 → 281 MB |
+| 10k + 1000 VLOOKUP | 1.83 s → **5.3 ms** | 1.86 s → **1.5 ms** | 1.79 s → 0.001 ms | 1.9 s → 0.8 ms | 4.5 / 3.2 ms | 17 → 19 MB |
+| 100k + 1000 VLOOKUP | 18.6 s → **62 ms** | 18.6 s → **16 ms** | 18.1 s → 0.001 ms | 18.6 s → 8 ms | 56 / 34 ms | 82 → 107 MB |
+| 300k + 1000 VLOOKUP | 53.5 s → **197 ms** | 53.5 s → **49 ms** | 53.5 s → 0.002 ms | 53.5 s → 26 ms | 195 / 112 ms | 212 → 292 MB |
 
-### Lookup cost (1000 formulas over a 10k-row table, `perf -- lookups`)
+(Before = a fresh run of the same harness on the vendored, unmodified 0.9.1,
+matching the original audit within noise. Before, every edit — formula edit
+and undo included — was a full evaluation, so those columns repeat the edit
+cost.)
+Unchanged: build via `Model::set_user_input` ≈ 6.7 µs/row, xlsx save
+1.4 s and load 2.3 s at 300k rows, `to_bytes` 9 ms.
 
-| Formula | evaluate | per formula |
+### Lookup cost (1000 formulas over a 10k-row table, full evaluation, `perf -- lookups`)
+
+| Formula | before | after |
 |---|---|---|
-| `VLOOKUP(k,A:B,2,FALSE)` | 2001 ms | 2.0 ms |
-| `XLOOKUP(k,A,B)` (exact) | 2062 ms | 2.1 ms |
-| `INDEX(B,MATCH(k,A,0))` | 116 ms | 0.12 ms |
-| `VLOOKUP(k,A:B,2,TRUE)` (sorted) | 111 ms | 0.11 ms |
-| `XLOOKUP(…,,0,2)` (binary) | 109 ms | 0.11 ms |
-| `SUMIF(A,k,B)` | 131 ms | 0.13 ms |
-| `SUM(A)` (baseline: just reading 10k cells) | 93 ms | 0.09 ms |
+| `VLOOKUP(k,A:B,2,FALSE)` | 1703 ms | **1.3 ms** |
+| `XLOOKUP(k,A,B)` (exact) | 1614 ms | **0.8 ms** |
+| `INDEX(B,MATCH(k,A,0))` | 92 ms | **0.9 ms** |
+| `VLOOKUP(k,A:B,2,TRUE)` (sorted) | 91 ms | 88 ms |
+| `XLOOKUP(…,,0,2)` (binary) | 84 ms | 81 ms |
+| `SUMIF(A,k,B)` | 95 ms | 90 ms |
+| `SUM(A)` (baseline: reading 10k cells) | 68 ms | 66 ms |
 
-Every function that takes a range reads **all** of it (≈ 9 ns/cell — the range is
-materialised into a `Vec<CalcResult>` through `evaluate_cell` for each formula), and exact
-VLOOKUP/XLOOKUP is another **20× slower** on top of that: `functions/util.rs::compare_values`
-calls `number_format::to_excel_precision` on *both* operands for every compared cell, and
-that function rounds via `format!("{:.*e}")` + `parse::<f64>()` — two string round-trips
-per cell (~200 ns). MATCH(…,0) uses a different comparison and is 17× faster.
+## What changed (in `third_party/ironcalc_base`)
 
-## Answers
+1. **Number comparison** (`functions/util.rs::compare_values`): exact
+   equality first, numbers more than 1e-12 apart (relative; and 1e-15
+   absolute) are ordered directly; only nearly equal numbers are rounded to 15
+   significant digits. `number_format::to_excel_precision` returns integers
+   below 1e15 and numbers whose shortest representation has ≤ 15 digits
+   unchanged, without `format!` + `parse`. Same results; this alone made exact
+   VLOOKUP/XLOOKUP ~20× faster and a full evaluation ~35 % faster (`IF(D>100)`
+   compares numbers too).
+2. **Exact-match lookup index** (`functions/lookup_cache.rs`): the first
+   VLOOKUP/HLOOKUP(FALSE), MATCH(…,0) or exact XLOOKUP into a vector in an
+   evaluation pass reads it once — exactly as the linear search does, so
+   formulas in it are evaluated and cycles found the same way — and hashes it;
+   later lookups are a probe. Used only where the hash gives the linear
+   search's answer (numbers of magnitude ≥ 1, text without wildcards); a
+   spill into an indexed vector reruns the pass without it. This replaced the
+   "stop at the first match" idea: stopping early changes which cells a
+   lookup reads, and with it cycle detection and spill-conflict detection.
+3. **Incremental recalculation** (`dependencies.rs`, `evaluation/incremental.rs`,
+   wired in `user_model/common.rs`), following the plan of the original audit:
+   * a reverse-dependency index built from the parsed formulas with relative
+     references resolved per cell — single cells per column sorted by row,
+     ranges as rectangles (`A:A` is one entry), volatile formulas
+     (NOW/TODAY/RAND/RANDBETWEEN/RANDARRAY/INDIRECT/OFFSET/CELL/INFO/SHEET(S),
+     defined names, tables, `A1:INDEX(…)`, `A1#`, LAMBDAs in names) always
+     dirty. Built lazily on the first incremental evaluation (≈ 60 ms at
+     900k formulas, ≈ 90 B per formula), updated per edited cell afterwards.
+   * `UserModel` reports `set_user_input`, `range_clear_contents` and undo/redo
+     of content edits as changed positions; every other operation makes the
+     next evaluation a full one (and drops the index).
+   * the dirty formulas (changed formulas, everything reachable from the
+     changed cells, volatile formulas and their dependents) run in the order a
+     full pass would; every other formula is read as its stored value.
+   * full evaluation instead when it cannot be shown identical: the edit
+     touches an array area (spill cells, CSE areas, spilling anchors), a
+     dynamic array is `#SPILL!`/`#CIRC!`, a dirty anchor would change its
+     spill size, the workbook has circular references, the dirty set is more
+     than half of the formulas. Spilling arrays elsewhere in the workbook and
+     single-value dynamic formulas (INDEX/MATCH, LET, INDIRECT — IronCalc
+     parses them as dynamic arrays) are handled incrementally.
+   * `UserModel::evaluate()` is incremental too (so `pause_evaluation` /
+     batch / `resume_evaluation` + `evaluate()` stays cheap);
+     `UserModel::evaluate_full()` recalculates everything.
+
+### How correctness is verified
+
+* **Check mode**: with `IRONCALC_CHECK_INCREMENTAL=1` (or
+  `UserModel::set_check_incremental(true)`) every incremental evaluation is
+  followed by a full one and all cells — values, error origins and messages,
+  spill cells — and HYPERLINK links are compared; a difference panics.
+* `third_party/ironcalc_base/src/test/test_incremental.rs` (check mode on):
+  targeted tests plus randomized edit sequences on two-sheet workbooks mixing
+  SUM ranges, whole columns, chains, cross-sheet references, IF, VLOOKUP,
+  HLOOKUP, INDEX/MATCH, XLOOKUP, SUMIFS, COUNTIF, SUMPRODUCT, TEXTJOIN, LET,
+  FILTER/SORT/UNIQUE/SEQUENCE spills, INDIRECT/OFFSET, `A1:INDEX(…)`, errors
+  and (rarely) cycles, with clears, undo/redo, row insert/delete and paused
+  batches. Default run: 400 sessions × 60 edits; `cargo test --release --
+  --ignored many_random_sessions`: 2000 × 120 edits (≈ 132 000 incremental
+  evaluations checked, 0 differences), also with `IRONCALC_MAX_DEPTH=1`
+  (every recursion unwinds and replays).
+* `third_party/ironcalc/tests/incremental_corpus.rs`: 40 random edits on each
+  of the 242 workbooks of upstream's Excel-made xlsx corpus (≈ 7 500
+  incremental evaluations checked, 0 differences).
+* The whole upstream suite (2 771 tests) passes in check mode; the only
+  failure is one that also fails on the published 0.9.1.
+* The check mode found three real problems during development, all fixed
+  before shipping: a typed value that blocks a spill changes the anchor
+  through `Model::set_user_input` (array areas are now recorded at every
+  full evaluation); new anchors must be ordered like `sync_anchor_order`
+  would; with circular references IronCalc's verdict depends on where the
+  recursion entered the cycle (such workbooks now always evaluate fully).
+
+## Answers (updated)
 
 ### 1. Does `UserModel::set_user_input` re-evaluate the whole workbook?
-**Yes.** `UserModel::set_user_input` (`ironcalc_base/src/user_model/common.rs:436`) calls
-`evaluate_if_not_paused()` (`:2296`) → `Model::evaluate()` (`src/evaluation.rs:506`), which runs
-`run_pass` over **every formula cell of every sheet** (`formula_positions()`) and then
-`evaluate_conditional_formatting()` (also full). There is no dependency graph (IronCalc
-issue #849): the measured latency for an edit of a cell that nothing depends on (column
-"isolated") is identical to editing a cell that feeds 3 formulas plus the summary row.
+**No longer**, except in the fall-back cases above. Before, every edit ran
+`Model::evaluate()` over every formula of every sheet. Now an edit runs the
+formulas that depend on it: 7 formulas (3 in the row + summary row) for the
+benchmark, 1008 with the VLOOKUP column. The remaining cost of the 300k-row
+edit (36 ms) is the summary formulas re-reading 300k cells each
+(`SUM(C1:C300000)`, `COUNTIF(E…)`), not bookkeeping: an edit nothing reads
+takes 1 µs.
 
 ### 2. When does a single edit exceed 100 ms?
-Cost is linear: ≈ **0.30 µs per simple formula cell** (+ the range reads).
-* Simple formulas only: ~**330k formula cells ≈ 110k rows** of this workbook (91 ms at 100k
-  rows, 272 ms at 300k).
-* Any formula that scans a range scales with *formulas × range length*: with 1000 exact
-  VLOOKUPs into the table the 100 ms budget is blown already at **~1k rows**
-  (1.6 s at 10k rows, ~19 s at 100k, ~55 s at 300k).
-
-Other observations: build via `set_user_input` ≈ 1.4 µs/cell; xlsx load ≈ 7.8 µs/row and
-dominates peak memory (≈ 3× the in-memory model at 300k rows: 592 MB peak vs 202 MB).
+* Edits that stay incremental: when the formulas depending on the edited cell
+  read more than ≈ 5–10 M cells (e.g. 30 aggregates over a 300k-row column).
+  Workbook size alone no longer matters.
+* Full evaluations (structural changes, paste via clipboard, sort, fill,
+  defined names, edits near spills, workbooks with circular references) cost
+  ≈ 0.2 µs per formula: ~100 ms at ≈ 500k formula cells (≈ 160k rows of the
+  benchmark). Exact lookups no longer multiply that (1000 VLOOKUPs into 300k
+  rows add 11 ms, not 53 s).
+* The first edit after opening a file is a full evaluation (185 ms at 300k
+  rows) and the second one builds the index (≈ +60 ms); from the third on
+  edits are incremental.
 
 ### 3. What does IronCalc already cache?
-* **Parsed ASTs, shared:** `Model::parsed_formulas: Vec<Vec<(Arc<Node>, StaticResult)>>`
-  (`src/model.rs:200`), and formulas that are the same in R1C1 form (`=A1*B1`, `=A2*B2`, …)
-  share one entry (`shared_formula_lookup`). Nothing is re-parsed on evaluate.
-* **Only formula cells are walked**, and sheets without formulas are skipped
-  (`sheets_with_formulas`, `formula_positions` in `evaluation.rs`).
-* Per pass, each formula is evaluated once (`Evaluation::cells` state map with a custom
-  fast hasher), dynamic-array anchor order is remembered across evaluations.
-* The pass already **records reads** (`Evaluation::seen`, `seen_ranges`, `record_seen`),
-  but only "first root that saw this position empty/occupied", used to restart passes
-  when a spill contradicts a read — not a usable reverse-dependency index.
+Parsed ASTs (shared between cells with the same R1C1 formula), formula
+positions per sheet, the dynamic-array anchor order; now also the dependency
+index (across evaluations) and the lookup index (per evaluation pass).
 
-So the "cheap tricks" (AST caching, only visiting formulas) are already in; what is left
-is to visit *fewer* formulas.
+## Notes for `core/` and the app
 
-### 4. Incremental recalculation — assessment and recommendation
+* No code change is required: the C ABI compiles unchanged and every edit
+  that goes through `UserModel` is incremental where possible, including
+  `foglio_paste_tsv` and find/replace (pause → `set_user_input`… → resume →
+  `evaluate()`).
+* `UserModel::evaluate()` is now "recalculate what is pending" (plus the
+  volatile formulas), so `foglio_evaluate_us` measures that, not a full
+  recalculation. For a "Recalculate all" command (Excel's Ctrl+Alt+F9) or a
+  timing of a full recalculation, call the new `UserModel::evaluate_full()`.
+* Debugging: run the app with `IRONCALC_CHECK_INCREMENTAL=1` to verify every
+  incremental evaluation against a full one (panics on a difference; slow).
+  `UserModel::last_evaluation_incremental()` / `last_full_evaluation_reason()`
+  tell what the last evaluation did.
 
-**Difficulty: medium-high inside IronCalc (≈ 800–1200 LOC + tests), but well-contained.**
+## What is left (ideas, not done)
 
-Plan (in a fork of `ironcalc_base`, ideally upstreamed):
-
-1. **Reverse-dependency index** — new `src/dependencies.rs`:
-   `cell_deps: HashMap<CellKey, Vec<CellKey>, KeyBuild>` for single references and a
-   per-sheet list of range rectangles → dependent (sorted by column, or an interval tree)
-   for `RangeKind`, plus `always_dirty: HashSet<CellKey>` for formulas that cannot be
-   analysed statically: volatile functions (`TODAY NOW RAND RANDBETWEEN RANDARRAY OFFSET
-   INDIRECT CELL INFO`), defined names, structured/table references, `LAMBDA` invocations
-   of names. Build it by walking each formula cell's `Node` (`expressions/parser/mod.rs`
-   `Node::ReferenceKind / RangeKind / OpRangeKind / FunctionKind`), resolving the
-   relative AST against the cell. Hook: `Model::parse_formulas` (`src/new_empty.rs:73`,
-   full rebuild on load) and `Model::set_cell_with_formula` (`src/model.rs:2794`,
-   incremental add/remove). Any structural change (insert/delete rows/cols, move, rename
-   sheet, defined-name edits) → simply mark the index stale and rebuild lazily (it is one
-   pass over the formula cells; cheaper than an evaluate).
-2. **`Model::evaluate_dirty(changed: &[CellKey])`** in `evaluation.rs`: BFS over the index
-   from the changed cells (+ `always_dirty`) → dirty set. Run a pass whose driver list is
-   the dirty set instead of `formula_positions()`; in `evaluate_formula_cell` a formula
-   cell that is **not** dirty returns `stored_value()` instead of running. Fall back to
-   the full `evaluate()` when the dirty set contains a dynamic-array anchor or spill area
-   (the restart machinery assumes a full pass), when the index is stale, or when the
-   dirty set exceeds ~30 % of formulas.
-3. **Wire it in** `UserModel::evaluate_if_not_paused` (`user_model/common.rs:2296`): the
-   changed cells are already known from the `diff_list` (`Diff::SetCellValue`,
-   `range_clear_contents`, paste …). Conditional formatting: re-evaluate only rules whose
-   range intersects the dirty set (`conditional_formatting.rs`).
-
-Expected effect: a value edit in the 300k-row workbook touches 3 formulas + 5 summary
-formulas → sub-millisecond instead of 272 ms; the summary `SUM(C1:C300000)` itself
-still re-reads 300k cells (≈ 3 ms) unless aggregates are also made incremental.
-
-**Cheaper things to do first (in this order):**
-
-1. **Fix exact-match comparison** (1-line-class change, 20× on VLOOKUP/XLOOKUP exact):
-   in `functions/util.rs::compare_values` compare numbers with a fast path
-   (`if (a-b).abs() > 1e-9*a.abs().max(b.abs()) { return sign }`) and only fall back to
-   `to_excel_precision` when they are nearly equal; or round the lookup value once in
-   `lookup_and_reference/mod.rs::lookup_index` / `xlookup.rs`. Also make
-   `to_excel_precision` arithmetic instead of `format!`+`parse`.
-2. **Stop materialising the whole lookup column**: `LookupTable::first_column`
-   (`functions/lookup_and_reference/mod.rs:94`) builds a `Vec` of all rows before
-   searching; iterate lazily and stop at the first exact match. Optionally a per-pass
-   memo `HashMap<(range, column), index>` in `Evaluation` so 1000 lookups into the same
-   table build it once (Excel does this).
-3. **Foglio-side, no engine change:** keep the model on a worker thread, apply the edit
-   with `pause_evaluation()` (≈ 1 µs, the typed value is shown immediately), then run
-   `evaluate()` asynchronously and coalesce edits that arrive while it runs (typing in
-   several cells, paste, fill → one evaluation). Use `pause_evaluation`/`resume_evaluation`
-   around every multi-cell operation. This makes ≤ 300k-row workbooks feel instant
-   (results arrive ≤ 0.3 s later) and is needed anyway as a safety net for workbooks with
-   heavy lookups.
-4. Save with `to_bytes()` for autosave/crash recovery (9 ms vs 1.4 s for xlsx at 300k rows);
-   write xlsx only on explicit save, off the main thread.
-
-Recommendation: do 3 (Foglio, now), 1 and 2 (small upstreamable PRs, big win for the most
-common heavy formula), then the dependency index (4) as a fork/PR once Foglio needs
->100k-row workbooks to recalc instantly.
+* **Aggregates over huge ranges**: `SUM(C1:C300000)` re-reads 300k cells on
+  every edit of C (≈ 5 ms each). Incremental aggregates (keep the sum, apply
+  the delta) would make that O(1), but only for SUM/COUNT-like functions and
+  with care for errors and precision.
+* **Structural edits** (insert/delete rows and columns, move, sort, paste
+  through the clipboard API) are full evaluations and drop the index; they
+  could shift the index and report the moved/pasted cells instead.
+* **Foglio-side**: run evaluation off the main thread and coalesce edits
+  (still useful for structural edits and for the first edit after load); save
+  autosave/crash-recovery with `to_bytes()` (9 ms vs 1.4 s xlsx at 300k rows).
+* Memory: the index costs ≈ 90 B per formula (≈ 80 MB at 900k formulas),
+  mostly the per-cell hash map of indexed formulas; recording the replaced
+  formula at edit time instead would remove it.
