@@ -1,20 +1,23 @@
 #!/usr/bin/env swift
-// Generates the Foglio app icon programmatically (CoreGraphics + CoreText, no external assets).
+// Generates the Foglio app icon programmatically (CoreGraphics only, no external assets).
 //
 // Usage:  swift scripts/make_icon.swift
 // Output: assets/icon-1024.png   master PNG (1024×1024)
-//         assets/Foglio.icns     all iconset sizes, built with iconutil
+//         assets/Foglio.icns     all iconset sizes (16–1024), built with iconutil
 //
-// Design (macOS Big Sur+ icon grid: 1024 canvas, 824 body centred, drop shadow below):
-//   • continuous-corner squircle with a teal gradient and a soft top sheen
-//   • a white sheet with a dark-teal header row, a row-number column, a grid,
-//     abstract "data" bars and a highlighted selected cell with a fill handle
-//   • a coral "Σ" badge in the lower-right corner
-// Sizes ≤ 32 px use a simplified, hand-tuned pixel-aligned variant so the grid stays crisp.
+// Optional: FOGLIO_ICON_PREVIEW=<dir> also writes every size plus a contact sheet
+// (light/dark backgrounds, small sizes magnified) into <dir> for eyeballing.
+//
+// Design — one idea: a sheet with one selected cell.
+//   • macOS icon grid: 1024 canvas, 824 continuous-corner squircle, soft drop shadow
+//   • green-teal body gradient (one hue), a white sheet card with a tinted header row,
+//     a 3 × 4 grid of hairlines and one cell filled with the body gradient
+//   • three colours in total: green-teal (light → deep), white, and a neutral grid grey
+// The geometry is laid out on a 64-unit lattice (16 canvas units) so every line lands on
+// whole pixels from 64 px up; 32 px and 16 px use hand-tuned pixel layouts of the same design.
 
 import AppKit
 import CoreGraphics
-import CoreText
 import Foundation
 
 let scriptURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
@@ -30,12 +33,11 @@ func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
 }
 
 // Palette
-let bgTop = color(0x34D1B2), bgBottom = color(0x0A7266)
-let header = color(0x0F6E63), headerMark = color(0xFFFFFF, 0.55)
-let rowCol = color(0xE3F3EF), rowMark = color(0x8DB5AD)
-let gridLine = color(0xD3E2DE), dataBar = color(0xB3C6C1), dataBarDark = color(0x7FA39B)
-let selection = color(0x12A893)
-let badgeTop = color(0xFF9566), badgeBottom = color(0xEE4F37)
+let accentTop = color(0x2FD382), accentBottom = color(0x0B8C62)   // body + selected cell
+let headerTint = color(0x1DB57A, 0.20)                              // accent at low alpha
+let gridLine = color(0xD3DFD9), gridLineSmall = color(0xBACBC3), gridLine16 = color(0xCAD8D1)
+let sheetTop = color(0xFFFFFF), sheetBottom = color(0xF0F4F2)
+let shadowTint = color(0x00402C)
 
 // MARK: - Geometry helpers
 
@@ -45,8 +47,6 @@ let badgeTop = color(0xFF9566), badgeBottom = color(0xEE4F37)
 func squirclePath(_ r: CGRect, radius: CGFloat) -> CGPath {
     precondition(r.width == r.height, "squircle expects a square")
     let h = r.width / 2, k = radius
-    // Top-right corner in centre-relative coordinates (y grows downward), from the top edge to
-    // the right edge.
     func P(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: h - dx * k, y: -h + dy * k) }
     let p = CGMutablePath()
     for q in 0..<4 {
@@ -71,194 +71,136 @@ func linearGradient(_ ctx: CGContext, _ c0: CGColor, _ c1: CGColor, from: CGPoin
     ctx.drawLinearGradient(g, start: from, end: to, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 }
 
+/// Shadows are specified in base (device, y-up) space, so scale them to the output size and
+/// flip the offset to keep them falling downward.
+func setShadow(_ ctx: CGContext, px: Int, dy: CGFloat, blur: CGFloat, _ c: CGColor) {
+    let s = CGFloat(px) / 1024
+    ctx.setShadow(offset: CGSize(width: 0, height: -dy * s), blur: blur * s, color: c)
+}
+
+// MARK: - Layout
+
+/// The sheet layout in canvas units (1024 canvas). Columns/rows are the cell sizes; the
+/// first row is the header. Lines sit on the boundaries between cells.
+struct Layout {
+    var sheet: CGRect
+    var radius: CGFloat
+    var cols: [CGFloat]
+    var rows: [CGFloat]
+    var line: CGFloat
+    var lineColor: CGColor
+    var selected: (col: Int, row: Int)
+    var selectedRadius: CGFloat
+    var selectedOutset: CGFloat
+    var shadow: Bool
+}
+
+func layout(px: Int) -> Layout {
+    let u = 1024 / CGFloat(px)        // canvas units per output pixel
+    switch px {
+    case ...16:
+        // 16 px: 10 × 10 sheet at (3,3); rows header 2 | 3 | 3, columns 2 | 4 | 2 (+1 px lines)
+        return Layout(sheet: CGRect(x: 3 * u, y: 3 * u, width: 10 * u, height: 10 * u), radius: 1.2 * u,
+                      cols: [2 * u, 4 * u, 2 * u], rows: [2 * u, 3 * u, 3 * u], line: u,
+                      lineColor: gridLine16, selected: (1, 1), selectedRadius: 0, selectedOutset: 0, shadow: false)
+    case ...32:
+        // 32 px: 18 × 18 sheet at (7,7); header 3 | 4 | 4 | 4 rows, 5 | 6 | 5 columns (+1 px lines)
+        return Layout(sheet: CGRect(x: 7 * u, y: 7 * u, width: 18 * u, height: 18 * u), radius: 1.8 * u,
+                      cols: [5 * u, 6 * u, 5 * u], rows: [3 * u, 4 * u, 4 * u, 4 * u], line: u,
+                      lineColor: gridLineSmall, selected: (1, 2), selectedRadius: 1.2 * u, selectedOutset: u, shadow: true)
+    default:
+        // 576 × 576 sheet: 3 columns of 192, 4 rows of 144 (header + 3) — all multiples of 16.
+        let lw: CGFloat = px >= 512 ? 10 : px >= 256 ? 12 : 16   // 64 px: 1 px, 128 px: 2 px, 256 px: 3 px
+        return Layout(sheet: CGRect(x: 224, y: 224, width: 576, height: 576), radius: 64,
+                      cols: [192, 192, 192], rows: [144, 144, 144, 144], line: lw,
+                      lineColor: px <= 128 ? gridLineSmall : gridLine, selected: (1, 2),
+                      selectedRadius: 22, selectedOutset: 8, shadow: true)
+    }
+}
+
 // MARK: - Drawing
 
 /// Draws the icon into `ctx`, whose user space is a 1024×1024 canvas with a top-left origin.
-/// `px` is the final pixel size (used for level of detail and pixel snapping).
 func drawIcon(_ ctx: CGContext, px: Int) {
     let small = px <= 32
-    let u = 1024 / CGFloat(px)                       // canvas units per output pixel
+    let u = 1024 / CGFloat(px)
+    func snap(_ v: CGFloat) -> CGFloat { (v / u).rounded() * u }     // to whole output pixels
 
     // ── Body (824 squircle centred on the 1024 grid) ────────────────────────────────────────
     let body = CGRect(x: 100, y: 100, width: 824, height: 824)
     let bodyPath = squirclePath(body, radius: 185.4)
 
     ctx.saveGState()
-    if !small {
-        ctx.setShadow(offset: CGSize(width: 0, height: 12), blur: 28, color: color(0x000000, 0.30))
-    } else {
-        ctx.setShadow(offset: CGSize(width: 0, height: u * 0.5), blur: u, color: color(0x000000, 0.25))
-    }
-    ctx.addPath(bodyPath); ctx.setFillColor(bgBottom); ctx.fillPath()
+    setShadow(ctx, px: px, dy: small ? max(10, u * 0.5) : 10, blur: small ? max(22, u) : 22, color(0x000000, 0.28))
+    ctx.addPath(bodyPath); ctx.setFillColor(accentBottom); ctx.fillPath()
     ctx.restoreGState()
 
     ctx.saveGState()
     ctx.addPath(bodyPath); ctx.clip()
-    linearGradient(ctx, bgTop, bgBottom, from: CGPoint(x: 512, y: 100), to: CGPoint(x: 512, y: 924))
-    // soft sheen in the upper half
-    let sheen = CGGradient(colorsSpace: sRGB, colors: [color(0xFFFFFF, 0.22), color(0xFFFFFF, 0)] as CFArray, locations: [0, 1])!
-    ctx.drawRadialGradient(sheen, startCenter: CGPoint(x: 512, y: 60), startRadius: 0,
-                           endCenter: CGPoint(x: 512, y: 60), endRadius: 620, options: [])
-    ctx.restoreGState()
-
-    // inner hairline for definition on light backgrounds
+    linearGradient(ctx, accentTop, accentBottom, from: CGPoint(x: 512, y: 100), to: CGPoint(x: 512, y: 924))
+    let sheen = CGGradient(colorsSpace: sRGB, colors: [color(0xFFFFFF, 0.16), color(0xFFFFFF, 0)] as CFArray, locations: [0, 1])!
+    ctx.drawRadialGradient(sheen, startCenter: CGPoint(x: 512, y: 100), startRadius: 0,
+                           endCenter: CGPoint(x: 512, y: 100), endRadius: 560, options: [])
     if !small {
-        ctx.saveGState()
-        ctx.addPath(bodyPath); ctx.clip()
-        ctx.addPath(bodyPath); ctx.setStrokeColor(color(0xFFFFFF, 0.18)); ctx.setLineWidth(6); ctx.strokePath()
-        ctx.restoreGState()
+        // hairline rim light along the top edge, fading out towards the bottom (subtle depth)
+        ctx.addPath(bodyPath); ctx.setLineWidth(8); ctx.replacePathWithStrokedPath(); ctx.clip()
+        linearGradient(ctx, color(0xFFFFFF, 0.35), color(0xFFFFFF, 0), from: CGPoint(x: 512, y: 100), to: CGPoint(x: 512, y: 420))
     }
+    ctx.restoreGState()
 
     // ── Sheet ───────────────────────────────────────────────────────────────────────────────
-    // Small sizes use a hand-tuned pixel layout (16 px: 10×10 sheet; 32 px: 18×18 sheet).
-    let sp: CGFloat = px <= 16 ? 1 : 2              // "small pixel" scale: 1 at 16 px, 2 at 32 px
-    let sheet = small ? CGRect(x: (px <= 16 ? 3 : 7) * u, y: (px <= 16 ? 3 : 7) * u,
-                               width: (px <= 16 ? 10 : 18) * u, height: (px <= 16 ? 10 : 18) * u)
-                      : CGRect(x: 214, y: 222, width: 596, height: 590)
-    let sheetRadius: CGFloat = small ? u * 0.9 * sp : 34
-    let sheetPath = roundRect(sheet, sheetRadius)
+    let L = layout(px: px)
+    let sheet = L.sheet
+    let sheetPath = small ? roundRect(sheet, L.radius) : squirclePath(sheet, radius: L.radius)
 
     ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: small ? u * 0.4 : 14), blur: small ? u : 30, color: color(0x003A33, 0.35))
-    ctx.addPath(sheetPath); ctx.setFillColor(color(0xFFFFFF)); ctx.fillPath()
+    if L.shadow { setShadow(ctx, px: px, dy: small ? u * 0.5 : 16, blur: small ? u : 34, shadowTint.copy(alpha: 0.32)!) }
+    ctx.addPath(sheetPath); ctx.setFillColor(sheetTop); ctx.fillPath()
     ctx.restoreGState()
+
+    // cell boundaries
+    var xs: [CGFloat] = [sheet.minX], ys: [CGFloat] = [sheet.minY]
+    let lineInCell = small            // small sizes: lines take their own pixel between cells
+    for w in L.cols { xs.append(xs.last! + w + (lineInCell ? L.line : 0)) }
+    for h in L.rows { ys.append(ys.last! + h + (lineInCell ? L.line : 0)) }
 
     ctx.saveGState()
     ctx.addPath(sheetPath); ctx.clip()
-    linearGradient(ctx, color(0xFFFFFF), color(0xF1F6F5), from: CGPoint(x: 0, y: sheet.minY), to: CGPoint(x: 0, y: sheet.maxY))
-
-    if small {
-        // Simplified: header band + 2×3 grid with 1-px lines and one coral cell.
-        // 16 px: header 2, rows 2|1|2|1|2, columns 5|1|4.   32 px: header 4, rows 4|1|4|1|4, columns 9|1|8.
-        let headerH = 2 * sp * u, rowH = 2 * sp * u
-        ctx.setFillColor(header)
-        ctx.fill(CGRect(x: sheet.minX, y: sheet.minY, width: sheet.width, height: headerH))
-        let colLineX = sheet.minX + (px <= 16 ? 5 : 9) * u
-        let row1 = sheet.minY + headerH, line1 = row1 + rowH, row2 = line1 + u, line2 = row2 + rowH
-        ctx.setFillColor(badgeBottom)
-        ctx.fill(CGRect(x: colLineX + u, y: row2, width: sheet.maxX - colLineX - u, height: rowH))
-        ctx.setFillColor(color(0xB0C8C2))
-        ctx.fill(CGRect(x: colLineX, y: row1, width: u, height: sheet.maxY - row1))
-        ctx.fill(CGRect(x: sheet.minX, y: line1, width: sheet.width, height: u))
-        ctx.fill(CGRect(x: sheet.minX, y: line2, width: sheet.width, height: u))
-        ctx.restoreGState()
-        return
+    linearGradient(ctx, sheetTop, sheetBottom, from: CGPoint(x: 0, y: sheet.minY), to: CGPoint(x: 0, y: sheet.maxY))
+    ctx.setFillColor(headerTint)
+    ctx.fill(CGRect(x: sheet.minX, y: sheet.minY, width: sheet.width, height: L.rows[0]))
+    ctx.setFillColor(L.lineColor)
+    for i in 1..<L.cols.count {
+        let x = lineInCell ? xs[i] - L.line : snap(xs[i] - L.line / 2)
+        ctx.fill(CGRect(x: x, y: sheet.minY, width: L.line, height: sheet.height))
     }
-
-    // Full detail
-    let headerH: CGFloat = 104
-    let rowColW: CGFloat = 78
-    let cols = 3, rows = 5
-    let gridTop = sheet.minY + headerH
-    let gridLeft = sheet.minX + rowColW
-    let cw = (sheet.maxX - gridLeft) / CGFloat(cols)
-    let rh = (sheet.maxY - gridTop) / CGFloat(rows)
-
-    // header row + subtle bottom shade
-    ctx.setFillColor(header)
-    ctx.fill(CGRect(x: sheet.minX, y: sheet.minY, width: sheet.width, height: headerH))
-    linearGradient(ctx, color(0xFFFFFF, 0.10), color(0xFFFFFF, 0), from: CGPoint(x: 0, y: sheet.minY), to: CGPoint(x: 0, y: sheet.minY + headerH))
-    ctx.setFillColor(header)
-
-    // row-number column
-    ctx.setFillColor(rowCol)
-    ctx.fill(CGRect(x: sheet.minX, y: gridTop, width: rowColW, height: sheet.maxY - gridTop))
-
-    // column letters as pills in the header
-    ctx.setFillColor(headerMark)
-    for c in 0..<cols {
-        let cx = gridLeft + cw * (CGFloat(c) + 0.5)
-        ctx.addPath(roundRect(CGRect(x: cx - 22, y: sheet.minY + headerH / 2 - 11, width: 44, height: 22), 11))
+    for i in 1..<L.rows.count {
+        let y = lineInCell ? ys[i] - L.line : snap(ys[i] - L.line / 2)
+        ctx.fill(CGRect(x: sheet.minX, y: y, width: sheet.width, height: L.line))
     }
-    ctx.fillPath()
-    // row-number pills
-    ctx.setFillColor(rowMark)
-    for r in 0..<rows {
-        let cy = gridTop + rh * (CGFloat(r) + 0.5)
-        ctx.addPath(roundRect(CGRect(x: sheet.minX + rowColW / 2 - 13, y: cy - 10, width: 26, height: 20), 10))
-    }
-    ctx.fillPath()
-
-    // data bars (abstract numbers, right-aligned like a real sheet)
-    let widths: [[CGFloat]] = [[0.62, 0.40, 0.52],
-                               [0.48, 0.70, 0.34],
-                               [0.70, 0.30, 0.58],
-                               [0.36, 0.56, 0.44],
-                               [0.54, 0.46, 0.66]]
-    for r in 0..<rows {
-        for c in 0..<cols {
-            if r == 1 && c == 1 { continue }           // selected cell drawn separately
-            let w = (cw - 52) * widths[r][c]
-            let x = gridLeft + cw * CGFloat(c + 1) - 26 - w
-            let y = gridTop + rh * (CGFloat(r) + 0.5) - 10
-            ctx.setFillColor(r == rows - 1 ? dataBarDark : dataBar)
-            ctx.addPath(roundRect(CGRect(x: x, y: y, width: w, height: 20), 10))
-            ctx.fillPath()
-        }
-    }
-
-    // grid lines
-    let lw = max(4, u * 0.8)                       // keep lines visible at 64–128 px
-    ctx.setFillColor(px <= 128 ? color(0xC4D6D2) : gridLine)
-    for c in 0...cols {
-        let x = gridLeft + cw * CGFloat(c) - lw / 2
-        ctx.fill(CGRect(x: x, y: gridTop, width: lw, height: sheet.maxY - gridTop))
-    }
-    for r in 1..<rows {
-        let y = gridTop + rh * CGFloat(r) - lw / 2
-        ctx.fill(CGRect(x: sheet.minX, y: y, width: sheet.width, height: lw))
-    }
-    // total row separator (double line feel)
-    ctx.setFillColor(color(0x9FBDB6))
-    ctx.fill(CGRect(x: gridLeft, y: gridTop + rh * CGFloat(rows - 1) - 3, width: sheet.maxX - gridLeft, height: 6))
     ctx.restoreGState()
 
-    // selected cell: tinted fill, bar, border and fill handle
-    let sel = CGRect(x: gridLeft + cw, y: gridTop + rh, width: cw, height: rh)
-    ctx.setFillColor(selection.copy(alpha: 0.12)!)
-    ctx.fill(sel)
-    ctx.setFillColor(selection)
-    let selBarW = (cw - 52) * 0.62
-    ctx.addPath(roundRect(CGRect(x: sel.maxX - 26 - selBarW, y: sel.midY - 10, width: selBarW, height: 20), 10))
-    ctx.fillPath()
-    ctx.addPath(roundRect(sel.insetBy(dx: 1, dy: 1), 6))
-    ctx.setStrokeColor(selection); ctx.setLineWidth(10); ctx.strokePath()
-    let handle = CGRect(x: sel.maxX - 15, y: sel.maxY - 15, width: 30, height: 30)
-    ctx.setFillColor(color(0xFFFFFF)); ctx.fill(handle.insetBy(dx: -6, dy: -6))
-    ctx.setFillColor(selection); ctx.fill(handle)
-
-    drawBadge(ctx, center: CGPoint(x: 792, y: 790), radius: 118, small: false, u: u)
-}
-
-func drawBadge(_ ctx: CGContext, center: CGPoint, radius: CGFloat, small: Bool, u: CGFloat) {
-    let r = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-    // white ring + shadow
+    // selected cell, filled with the body gradient
+    let (c, r) = L.selected
+    let cell0 = CGRect(x: xs[c], y: ys[r], width: L.cols[c], height: L.rows[r])
+    let o = cell0.insetBy(dx: -L.selectedOutset, dy: -L.selectedOutset)
+    let cell = CGRect(x: snap(o.minX), y: snap(o.minY), width: snap(o.maxX) - snap(o.minX), height: snap(o.maxY) - snap(o.minY))
     ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: small ? u * 0.3 : 10), blur: small ? u * 0.8 : 24, color: color(0x3A0F00, 0.35))
-    ctx.setFillColor(color(0xFFFFFF))
-    ctx.fillEllipse(in: r.insetBy(dx: small ? -u * 0.8 : -12, dy: small ? -u * 0.8 : -12))
+    if !small { setShadow(ctx, px: px, dy: 6, blur: 14, shadowTint.copy(alpha: 0.30)!) }
+    ctx.addPath(roundRect(cell, L.selectedRadius)); ctx.setFillColor(accentBottom); ctx.fillPath()
     ctx.restoreGState()
-
     ctx.saveGState()
-    ctx.addEllipse(in: r); ctx.clip()
-    linearGradient(ctx, badgeTop, badgeBottom, from: CGPoint(x: r.midX, y: r.minY), to: CGPoint(x: r.midX, y: r.maxY))
-    ctx.restoreGState()
-
-    // Σ glyph (SF Pro Rounded Heavy), drawn unflipped around the centre.
-    var font = NSFont.systemFont(ofSize: radius * (small ? 1.5 : 1.28), weight: small ? .black : .heavy)
-    if let d = font.fontDescriptor.withDesign(.rounded), let f = NSFont(descriptor: d, size: font.pointSize) { font = f }
-    let attr = NSAttributedString(string: "Σ", attributes: [.font: font, .foregroundColor: NSColor.white])
-    let line = CTLineCreateWithAttributedString(attr)
-    let ib = CTLineGetImageBounds(line, ctx)
-    ctx.saveGState()
-    ctx.translateBy(x: center.x, y: center.y)
-    ctx.scaleBy(x: 1, y: -1)
-    ctx.textPosition = CGPoint(x: -ib.midX, y: -ib.midY)
-    CTLineDraw(line, ctx)
+    ctx.addPath(roundRect(cell, L.selectedRadius)); ctx.clip()
+    linearGradient(ctx, accentTop, accentBottom, from: CGPoint(x: 0, y: cell.minY - 40), to: CGPoint(x: 0, y: cell.maxY + 40))
+    if !small {
+        // soft inner rim light on the top edge of the selected cell
+        ctx.addPath(roundRect(cell, L.selectedRadius)); ctx.setLineWidth(6); ctx.replacePathWithStrokedPath(); ctx.clip()
+        linearGradient(ctx, color(0xFFFFFF, 0.35), color(0xFFFFFF, 0), from: CGPoint(x: 0, y: cell.minY), to: CGPoint(x: 0, y: cell.minY + 24))
+    }
     ctx.restoreGState()
 }
 
-func render(px: Int) -> Data {
+func render(px: Int) -> CGImage {
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     ctx.interpolationQuality = .high
@@ -267,28 +209,56 @@ func render(px: Int) -> Data {
     ctx.translateBy(x: 0, y: CGFloat(px))
     ctx.scaleBy(x: s, y: -s)
     drawIcon(ctx, px: px)
-    let rep = NSBitmapImageRep(cgImage: ctx.makeImage()!)
-    return rep.representation(using: .png, properties: [:])!
+    return ctx.makeImage()!
 }
 
+func pngData(_ img: CGImage) -> Data { NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])! }
+
 // MARK: - Output
+
+var cache: [Int: CGImage] = [:]
+func image(_ px: Int) -> CGImage { if let i = cache[px] { return i }; let i = render(px: px); cache[px] = i; return i }
 
 let iconset = FileManager.default.temporaryDirectory.appendingPathComponent("Foglio-\(getpid()).iconset")
 try? FileManager.default.removeItem(at: iconset)
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
-
-var cache: [Int: Data] = [:]
-func png(_ px: Int) -> Data { if let d = cache[px] { return d }; let d = render(px: px); cache[px] = d; return d }
-
 for base in [16, 32, 128, 256, 512] {
-    try png(base).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
-    try png(base * 2).write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
+    try pngData(image(base)).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
+    try pngData(image(base * 2)).write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
 }
-try png(1024).write(to: assets.appendingPathComponent("icon-1024.png"))
+try pngData(image(1024)).write(to: assets.appendingPathComponent("icon-1024.png"))
 
-// Optional previews of the small sizes (for eyeballing): FOGLIO_ICON_PREVIEW=1
-if ProcessInfo.processInfo.environment["FOGLIO_ICON_PREVIEW"] != nil {
-    for px in [16, 32, 64, 128] { try png(px).write(to: assets.appendingPathComponent("preview-\(px).png")) }
+if let dir = ProcessInfo.processInfo.environment["FOGLIO_ICON_PREVIEW"], !dir.isEmpty {
+    let out = URL(fileURLWithPath: dir)
+    try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+    for px in [16, 32, 64, 128, 256, 1024] { try pngData(image(px)).write(to: out.appendingPathComponent("icon-\(px).png")) }
+    // Contact sheet: actual sizes 256…16 on light and dark, plus 32 ×4, 16 ×8 and 64 ×2 magnified.
+    let W = 900, H = 640
+    let sheet = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,
+                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    sheet.interpolationQuality = .none
+    for (row, bg) in [(0, color(0xF2F2F2)), (1, color(0x1E1E1E))] {
+        let y0 = H - (row + 1) * 320
+        sheet.setFillColor(bg); sheet.fill(CGRect(x: 0, y: y0, width: W, height: 320))
+        var x = 16
+        for s in [256, 128, 64, 32, 16] { sheet.draw(image(s), in: CGRect(x: x, y: y0 + 32, width: s, height: s)); x += s + 16 }
+        sheet.draw(image(32), in: CGRect(x: x, y: y0 + 160, width: 128, height: 128))
+        sheet.draw(image(16), in: CGRect(x: x, y: y0 + 16, width: 128, height: 128)); x += 144
+        sheet.draw(image(64), in: CGRect(x: x, y: y0 + 160, width: 128, height: 128))
+    }
+    try pngData(sheet.makeImage()!).write(to: out.appendingPathComponent("contact-sheet.png"))
+    // Pixel zoom: 16 ×16, 32 ×8, 64 ×4 (nearest neighbour) on light and dark.
+    let zoom = CGContext(data: nil, width: 832, height: 560, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,
+                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    zoom.interpolationQuality = .none
+    for (row, bg) in [(0, color(0xF2F2F2)), (1, color(0x1E1E1E))] {
+        let y0 = 560 - (row + 1) * 280
+        zoom.setFillColor(bg); zoom.fill(CGRect(x: 0, y: y0, width: 832, height: 280))
+        for (i, s) in [16, 32, 64].enumerated() {
+            zoom.draw(image(s), in: CGRect(x: 16 + i * 272, y: y0 + 12, width: 256, height: 256))
+        }
+    }
+    try pngData(zoom.makeImage()!).write(to: out.appendingPathComponent("small-zoom.png"))
 }
 
 let icns = assets.appendingPathComponent("Foglio.icns")
