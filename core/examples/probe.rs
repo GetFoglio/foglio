@@ -7,7 +7,11 @@ fn main() {
         Err(_) => println!("calamine xlsx: PANIC"),
     }
     match std::panic::catch_unwind(|| ironcalc::import::load_from_xlsx(&path, "en", "UTC", "en")) {
-        Ok(Ok(m)) => println!("ironcalc: OK, charts per sheet: {:?}", m.workbook.worksheets.iter().map(|w| w.charts.len()).collect::<Vec<_>>()),
+        Ok(Ok(m)) => println!(
+            "ironcalc: OK, charts per sheet: {:?}, pictures per sheet: {:?}",
+            m.workbook.worksheets.iter().map(|w| w.charts.len()).collect::<Vec<_>>(),
+            m.workbook.worksheets.iter().map(|w| w.pictures.len()).collect::<Vec<_>>()
+        ),
         Ok(Err(e)) => println!("ironcalc: {e:?}"),
         Err(_) => println!("ironcalc: PANIC"),
     }

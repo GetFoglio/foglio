@@ -322,6 +322,7 @@ dependencies = [
  "ironcalc",
  "rust_xlsxwriter",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

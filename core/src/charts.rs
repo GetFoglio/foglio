@@ -20,7 +20,7 @@ use crate::{book, book_ref, cstr, guard, to_c, FoglioBook};
 
 // ---------- anchor <-> fractions ----------
 
-fn point_json(ws: &Worksheet, p: &AnchorPoint) -> Value {
+pub(crate) fn point_json(ws: &Worksheet, p: &AnchorPoint) -> Value {
     let w = column_width_emu(ws, p.column);
     let h = row_height_emu(ws, p.row);
     let fx = if w > 0 { (p.column_offset as f64 / w as f64).clamp(0.0, 1.0) } else { 0.0 };
@@ -28,7 +28,7 @@ fn point_json(ws: &Worksheet, p: &AnchorPoint) -> Value {
     json!({ "row": p.row, "col": p.column, "fy": fy, "fx": fx })
 }
 
-fn point_from(ws: &Worksheet, row: i32, col: i32, fy: f64, fx: f64) -> AnchorPoint {
+pub(crate) fn point_from(ws: &Worksheet, row: i32, col: i32, fy: f64, fx: f64) -> AnchorPoint {
     let row = row.clamp(1, 1_048_576);
     let column = col.clamp(1, 16_384);
     let fy = if fy.is_finite() { fy.clamp(0.0, 1.0) } else { 0.0 };
@@ -80,6 +80,7 @@ fn chart_json(ws: &Worksheet, index: usize, c: &Chart) -> Value {
     let mut v = serde_json::to_value(c).unwrap_or(Value::Null);
     if let Value::Object(m) = &mut v {
         m.insert("index".into(), json!(index));
+        m.remove("z"); // stacking order: see foglio_drawing_order_json (pictures.rs)
         m.insert(
             "anchor".into(),
             json!({ "from": point_json(ws, &c.anchor.from), "to": point_json(ws, &c.anchor.to) }),

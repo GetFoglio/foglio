@@ -14,6 +14,7 @@ pub(crate) const NO_COLOR: u32 = 0xFFFF_FFFF;
 
 mod ui;
 pub mod charts; // Foglio charts: C ABI in src/charts.rs, include/foglio_charts.h
+pub mod pictures; // Foglio pictures: C ABI in src/pictures.rs, include/foglio_pictures.h
 
 // ---------- locale settings (shared by new and opened workbooks) ----------
 
