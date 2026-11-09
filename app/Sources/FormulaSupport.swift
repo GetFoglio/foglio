@@ -186,9 +186,11 @@ final class CompletionPopup: NSPanel, NSTableViewDataSource, NSTableViewDelegate
     }
 
     func hide() {
+        guard isVisible || !items.isEmpty else { return }
         parent?.removeChildWindow(self)
         orderOut(nil)
         items = []
+        table.reloadData()
     }
 
     func move(_ d: Int) {
@@ -217,6 +219,7 @@ final class CompletionPopup: NSPanel, NSTableViewDataSource, NSTableViewDelegate
                                          t.centerYAnchor.constraint(equalTo: c.centerYAnchor)])
             return c
         }()
+        guard row < items.count else { return nil }
         let name = items[row]
         let s = NSMutableAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
         if let d = FunctionDocs.doc(Workbook.englishName(name)) {
@@ -308,9 +311,9 @@ final class FormulaSession {
         if let p = pointRange, NSMaxRange(p) == caret { r = p } else { r = NSRange(location: caret, length: 0) }
         inserting = true
         tv.insertText(s, replacementRange: r)
-        inserting = false
         pointRange = NSRange(location: r.location, length: (s as NSString).length)
         textChanged()
+        inserting = false
     }
 
     func textChanged() {

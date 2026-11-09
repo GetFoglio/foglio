@@ -991,9 +991,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if sheet != targetSheet { sheet = targetSheet }
         if fillSelection && !selection.isSingle {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
-            if let c = book.copy(sheet: sheet, GridRange(target, target)) {
-                _ = book.pasteInternal(sheet: sheet, selection, token: c.token, cut: false)
-            }
+            fill(from: GridRange(target, target), into: selection)
         } else {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
         }
@@ -1299,21 +1297,39 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         contentChanged()
     }
 
+    /// Copies `src` over `dest` with relative references adjusted (Excel's Fill / ⌘↩), via the engine's autofill.
+    private func fill(from src: GridRange, into dest: GridRange) {
+        // 1. down/up along the source columns
+        var col = src
+        if dest.r1 > src.r1 { book.autofill(sheet: sheet, src, toRow: dest.r1, toCol: nil); col.r1 = dest.r1 }
+        if dest.r0 < src.r0 { book.autofill(sheet: sheet, GridRange(r0: src.r0, c0: src.c0, r1: col.r1, c1: src.c1), toRow: dest.r0, toCol: nil); col.r0 = dest.r0 }
+        // 2. then right/left with the whole filled column block
+        if dest.c1 > src.c1 { book.autofill(sheet: sheet, col, toRow: nil, toCol: dest.c1) }
+        if dest.c0 < src.c0 { book.autofill(sheet: sheet, GridRange(r0: col.r0, c0: col.c0, r1: col.r1, c1: max(col.c1, dest.c1)), toRow: nil, toCol: dest.c0) }
+    }
+
     @objc func fillDown(_ sender: Any?) {
+        commitIfEditing()
         guard selection.rows > 1 else { return }
-        let src = GridRange(r0: selection.r0, c0: selection.c0, r1: selection.r0, c1: selection.c1)
-        if let c = book.copy(sheet: sheet, src) {
-            _ = book.pasteInternal(sheet: sheet, GridRange(r0: selection.r0 + 1, c0: selection.c0, r1: selection.r1, c1: selection.c1), token: c.token, cut: false)
-        }
+        let r = clampedToData(selection)
+        fill(from: GridRange(r0: r.r0, c0: r.c0, r1: r.r0, c1: r.c1), into: r)
         contentChanged()
     }
     @objc func fillRight(_ sender: Any?) {
+        commitIfEditing()
         guard selection.cols > 1 else { return }
-        let src = GridRange(r0: selection.r0, c0: selection.c0, r1: selection.r1, c1: selection.c0)
-        if let c = book.copy(sheet: sheet, src) {
-            _ = book.pasteInternal(sheet: sheet, GridRange(r0: selection.r0, c0: selection.c0 + 1, r1: selection.r1, c1: selection.c1), token: c.token, cut: false)
-        }
+        let r = clampedToData(selection)
+        fill(from: GridRange(r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c0), into: r)
         contentChanged()
+    }
+
+    /// Whole-column/row selections are limited to the used range for fills.
+    private func clampedToData(_ r: GridRange) -> GridRange {
+        let g = geo
+        var out = r
+        if r.isFullColumns { out.r1 = max(r.r0, g.maxRow) }
+        if r.isFullRows { out.c1 = max(r.c0, g.maxCol) }
+        return out
     }
 
     @objc func mergeAndCenter(_ sender: Any?) {
@@ -1527,6 +1543,13 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         guard let hit = book.find(sheet: sheet, after: active, q, flags: flags) else { NSSound.beep(); return false }
         select(hit)
         return true
+    }
+
+    /// Centre of a cell in window coordinates (used by automated UI tests).
+    func windowPoint(for c: CellRef) -> NSPoint {
+        let r = cellRect(c.row, c.col, geo)
+        let viewPoint = NSPoint(x: r.midX * zoom, y: r.midY * zoom)
+        return convert(viewPoint, to: nil)
     }
 
     // MARK: - Benchmark

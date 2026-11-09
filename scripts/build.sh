@@ -14,7 +14,9 @@ libs=() bins=()
 for arch in $ARCHS; do
   triple=$([[ $arch == arm64 ]] && echo aarch64-apple-darwin || echo x86_64-apple-darwin)
   echo "▸ Rust core ($arch)"
-  MACOSX_DEPLOYMENT_TARGET=$MIN_OS cargo build --release --quiet --manifest-path $ROOT/core/Cargo.toml --target $triple
+  if [[ -z "${FOGLIO_SKIP_RUST:-}" ]]; then
+    MACOSX_DEPLOYMENT_TARGET=$MIN_OS cargo build --release --quiet --manifest-path $ROOT/core/Cargo.toml --target $triple
+  fi
   libs+=$ROOT/core/target/$triple/release/libfoglio_core.a
 
   echo "▸ Swift app ($arch)"

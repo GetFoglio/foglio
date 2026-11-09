@@ -121,10 +121,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let w = c.window { Perf.shared.emit("WINDOW_ID", "\(w.windowNumber)") }
             if let snapshot {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    if let script = self?.env["FOGLIO_SCRIPT"] { UIScript.run(script, on: c) }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        Snapshot.write(c.window, to: snapshot)
-                        exit(0)
+                    let script = self?.env["FOGLIO_SCRIPT"] ?? ""
+                    c.window?.makeKey()   // key within the app, without activating it (no focus stealing)
+                    UIScript.runAsync(script, on: c) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            if snapshot != "/dev/null" { Snapshot.write(c.window, to: snapshot) }
+                            exit(0)
+                        }
                     }
                 }
             } else if let frames {
@@ -161,11 +164,60 @@ enum Snapshot {
 
 /// Tiny scripting hook for automated UI checks: "select B4:D9; type =SUM(B2:B5); key return; ..."
 enum UIScript {
-    static func run(_ script: String, on c: SheetWindowController) {
-        for raw in script.components(separatedBy: ";;") {
-            let cmd = raw.trimmingCharacters(in: .whitespaces)
+    /// Runs steps one per run-loop turn (80 ms apart) so popups, focus changes and redraws happen like real use.
+    static func runAsync(_ script: String, on c: SheetWindowController, done: @escaping () -> Void) {
+        var steps = script.components(separatedBy: ";;").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        func next() {
+            guard !steps.isEmpty else { done(); return }
+            let step = steps.removeFirst()
+            run(step, on: c)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { next() }
+        }
+        next()
+    }
+
+    private static let keyCodes: [String: (UInt16, String)] = [
+        "return": (36, "\r"), "tab": (48, "\t"), "esc": (53, "\u{1b}"), "delete": (51, "\u{7f}"),
+        "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "left": (123, "\u{F702}"), "right": (124, "\u{F703}"),
+        "f2": (120, "\u{F705}"), "f4": (118, "\u{F707}"), "space": (49, " "), "home": (115, "\u{F729}"),
+    ]
+
+    /// Sends a real key event through the window (same path as the keyboard).
+    static func sendKey(_ chars: String, code: UInt16, mods: NSEvent.ModifierFlags, to w: NSWindow) {
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: w.windowNumber, context: nil, characters: chars,
+                                        charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                NSApp.sendEvent(e)
+            }
+        }
+    }
+
+    static func sendClick(at p: NSPoint, count: Int, mods: NSEvent.ModifierFlags = [], right: Bool = false, to w: NSWindow) {
+        let types: [NSEvent.EventType] = right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp]
+        for type in types {
+            if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1) {
+                NSApp.sendEvent(e)
+            }
+        }
+    }
+
+    static func menuItem(key: String, mods: NSEvent.ModifierFlags, in menu: NSMenu?) -> NSMenuItem? {
+        guard let menu else { return nil }
+        for item in menu.items {
+            if item.keyEquivalent.lowercased() == key && item.keyEquivalentModifierMask.intersection([.command, .shift, .option, .control]) == mods.intersection([.command, .shift, .option, .control]) {
+                return item
+            }
+            if let sub = menuItem(key: key, mods: mods, in: item.submenu) { return sub }
+        }
+        return nil
+    }
+
+    static func run(_ cmd: String, on c: SheetWindowController) {
+        do {
             let parts = cmd.split(separator: " ", maxSplits: 1).map(String.init)
-            guard let verb = parts.first else { continue }
+            guard let verb = parts.first else { return }
             let arg = parts.count > 1 ? parts[1] : ""
             switch verb {
             case "select": if let r = FormulaText.gridRange(arg.uppercased()) { c.grid.select(range: r) }
@@ -191,6 +243,43 @@ enum UIScript {
                 do { try c.grid.book.saveXLSX(to: URL(fileURLWithPath: arg)); print("SAVED", arg) } catch { print("SAVE_ERROR", error) }
             case "print":
                 if let ref = parseA1(arg) { print("CELL", arg, "=", c.grid.book.formatted(sheet: c.grid.sheet, row: ref.row, col: ref.col), "|", c.grid.book.input(sheet: c.grid.sheet, row: ref.row, col: ref.col)) }
+            case "type": // type characters one key event each
+                guard let w = c.window else { break }
+                for ch in arg { sendKey(String(ch), code: 0, mods: [], to: w) }
+            case "key": // key return | key shift+tab | key cmd+b
+                guard let w = c.window else { break }
+                var mods: NSEvent.ModifierFlags = []
+                var name = arg.lowercased()
+                var stripped = true
+                while stripped {
+                    stripped = false
+                    for (prefix, flag) in [("shift+", NSEvent.ModifierFlags.shift), ("cmd+", .command), ("opt+", .option), ("ctrl+", .control)]
+                    where name.hasPrefix(prefix) { mods.insert(flag); name.removeFirst(prefix.count); stripped = true }
+                }
+                if let (code, chars) = keyCodes[name] { sendKey(chars, code: code, mods: mods, to: w) }
+                else if name.count == 1 {
+                    if mods.contains(.command) || mods.contains(.control), let item = menuItem(key: name, mods: mods, in: NSApp.mainMenu) {
+                        // Same as the menu bar: validate, then send the action down the window's responder chain.
+                        let responder = w.firstResponder ?? w
+                        if let action = item.action, responder.tryToPerform(action, with: item) { print("MENU", item.title) }
+                        else { print("MENU_UNHANDLED", item.title) }
+                    } else { sendKey(name, code: 0, mods: mods, to: w) }
+                }
+            case "click", "dblclick", "shiftclick", "rightclick": // click B5
+                guard let w = c.window, let ref = parseA1(arg) else { break }
+                let p = c.grid.windowPoint(for: ref)
+                sendClick(at: p, count: cmd.hasPrefix("dbl") ? 2 : 1, mods: cmd.hasPrefix("shift") ? .shift : [], right: cmd.hasPrefix("right"), to: w)
+            case "state":
+                let g = c.grid!
+                let fr = g.window?.firstResponder
+                print("STATE active=\(columnName(g.active.col))\(g.active.row + 1) sel=\(g.selection.a1) editing=\(g.isEditing) pointing=\(g.isPointing) responder=\(fr.map { String(describing: type(of: $0)) } ?? "nil") text=\((fr as? NSTextView)?.string ?? "")")
+            case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
+            case "debug":
+                print("DEBUG keyWindow=\(NSApp.keyWindow != nil) isActive=\(NSApp.isActive) cycle=\(String(describing: c.grid.book.cycleReference("=B2*3", start: 3, end: 3))) cycle2=\(String(describing: c.grid.book.cycleReference("B2*3", start: 2, end: 2)))")
+            case "popup":
+                for w in NSApp.windows where w.isVisible && (w is CompletionPopup || w is HintPopup) {
+                    print("POPUP \(type(of: w)) \((w as? CompletionPopup)?.items.prefix(5).joined(separator: ",") ?? "")")
+                }
             case "dump":
                 func walk(_ v: NSView, _ depth: Int) {
                     if v is NSButton || v is NSTextField || v is NSPopUpButton {

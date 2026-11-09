@@ -195,7 +195,7 @@ final class FunctionBrowser: NSPanel, NSTableViewDataSource, NSTableViewDelegate
 
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let t = NSTextField(labelWithString: items[row])
+        let t = NSTextField(labelWithString: items[safe: row] ?? "")
         t.font = .systemFont(ofSize: 12, weight: .medium)
         return t
     }
