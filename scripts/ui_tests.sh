@@ -87,12 +87,12 @@ run "tiled paste is one undo step" "input A1=5;; click A1;; key cmd+c;; select C
 run "sort keeps links" "input A1=b;; input A2=a;; link A1 https://b.example;; sortkeys A1:A2 A+;; linkof A2;; linkof A1" "LINK A2 https://b.example" "LINK A1 -"
 run "tab run ends on arrows" "click B2;; type 1;; key tab;; key down;; type 2;; key return;; state" "active=C4"
 run "internal link with quoted sheet" "key cmd+shift+n;; tab 0;; input A1=x;; followlink #'Foglio2'!C5;; sheets;; state" "current=1" "active=C5"
-if [[ -f /private/tmp/claude-501/poi-test/files/123233_charts.xlsx ]]; then
-  out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP /private/tmp/claude-501/poi-test/files/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)
+if [[ -f ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx ]]; then
+  out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)
   [[ $out -eq 4 ]] && echo "✓ charts of the first sheet load on open" || { echo "✗ charts on open (got $out)"; fail=1; }
 fi
-if [[ -f /private/tmp/claude-501/poi-test/files/WithDrawing.xlsx ]]; then
-  out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="pic panes" timeout 40 $APP /private/tmp/claude-501/poi-test/files/WithDrawing.xlsx 2>&1 | grep -c PICTUREVIEW)
+if [[ -f ${FOGLIO_CORPUS:-/tmp/poi-test/files}/WithDrawing.xlsx ]]; then
+  out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="pic panes" timeout 40 $APP ${FOGLIO_CORPUS:-/tmp/poi-test/files}/WithDrawing.xlsx 2>&1 | grep -c PICTUREVIEW)
   [[ $out -eq 5 ]] && echo "✓ pictures of an Excel file load on open" || { echo "✗ pictures on open (got $out)"; fail=1; }
 fi
 exit $fail

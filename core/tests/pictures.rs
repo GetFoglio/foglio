@@ -435,7 +435,7 @@ fn broken_drawing_parts_are_skipped() {
 /// every picture survives a save and reopen with its image, crop and placement.
 #[test]
 fn real_files_round_trip() {
-    let dir = std::env::var("FOGLIO_CORPUS").unwrap_or_else(|_| "/private/tmp/claude-501/poi-test/files".into());
+    let dir = std::env::var("FOGLIO_CORPUS").unwrap_or_else(|_| "/tmp/poi-test/files".into());
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
     let mut checked = 0;
     for e in entries.flatten() {

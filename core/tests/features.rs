@@ -200,7 +200,8 @@ fn part(path: &Path, name: &str) -> Option<String> {
 
 /// Runs a check with openpyxl if the venv exists (see the repository notes); returns its stdout.
 fn openpyxl(script: &str, path: &Path) -> Option<String> {
-    let python = Path::new("/private/tmp/foglio-venv/bin/python");
+    let python = std::env::var("FOGLIO_VENV_PYTHON").unwrap_or_else(|_| "/tmp/foglio-venv/bin/python".into());
+    let python = Path::new(&python);
     if !python.exists() {
         eprintln!("openpyxl venv not found: skipping the openpyxl check");
         return None;
