@@ -23,11 +23,19 @@ enum Menus {
     typealias W = SheetWindowController
 
     static func numberFormatItems() -> [NSMenuItem] {
-        NumberFormats.all.enumerated().map { i, f in item(f.title, #selector(W.applyNumberFormat(_:)), tag: i) }
+        // Excel for Mac shortcuts: ⌃⇧~ General, ⌃⇧! Number, ⌃⇧$ Currency, ⌃⇧# Date, ⌃⇧@ Time, ⌃⇧% Percent, ⌃⇧^ Scientific
+        let keys: [Int: String] = [0: "~", 1: "!", 2: "$", 4: "#", 6: "@", 7: "%", 9: "^"]
+        return NumberFormats.all.enumerated().map { i, f in
+            item(f.title, #selector(W.applyNumberFormat(_:)), keys[i] ?? "", [.control, .shift], tag: i)
+        }
     }
 
     static func borderItems() -> [NSMenuItem] {
-        Borders.all.enumerated().map { i, b in item(b.title, #selector(W.applyBorder(_:)), tag: i, symbol: b.symbol) }
+        // ⌥⌘0 outline, ⌥⌘- no border (Excel for Mac)
+        Borders.all.enumerated().map { i, b in
+            let key = b.kind == "Outer" && b.style == "thin" ? "0" : (b.kind == "None" ? "-" : "")
+            return item(b.title, #selector(W.applyBorder(_:)), key, [.command, .option], tag: i, symbol: b.symbol)
+        }
     }
 
     static func mainMenu() -> NSMenu {
@@ -78,8 +86,12 @@ enum Menus {
             item("Cut", #selector(NSText.cut(_:)), "x"),
             item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Paste Special…", #selector(GridView.pasteSpecial(_:)), "v", [.command, .control]),
             item("Paste Values", #selector(GridView.pasteValues(_:)), "v", [.command, .option, .shift]),
+            item("Repeat", #selector(GridView.repeatLastAction(_:)), "y"),
+            .separator(),
             item("Delete", #selector(NSText.delete(_:))),
+            item("Delete Cells…", #selector(GridView.deleteCellsDialog(_:)), "-", [.command]),
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
             .separator(),
             item("Fill Down", #selector(GridView.fillDown(_:)), "d"),
@@ -98,8 +110,8 @@ enum Menus {
         ]))
 
         main.addItem(submenu("View", [
-            item("Zoom In", #selector(GridView.zoomIn(_:)), "+"),
-            item("Zoom Out", #selector(GridView.zoomOut(_:)), "-"),
+            item("Zoom In", #selector(GridView.zoomIn(_:)), "=", [.command, .option]),
+            item("Zoom Out", #selector(GridView.zoomOut(_:)), "-", [.command, .option]),
             item("Actual Size", #selector(GridView.actualSize(_:)), "0"),
             .separator(),
             item("Freeze Panes", #selector(GridView.freezePanes(_:))),
@@ -107,12 +119,14 @@ enum Menus {
             item("Freeze First Column", #selector(GridView.freezeFirstColumn(_:))),
             .separator(),
             item("Gridlines", #selector(GridView.toggleGridlines(_:))),
+            item("Show Formulas", #selector(GridView.toggleShowFormulas(_:)), "`", [.control]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ]))
 
         main.addItem(submenu("Insert", [
-            item("Rows", #selector(GridView.insertRows(_:)), "+", [.command, .shift]),
+            item("Cells…", #selector(GridView.insertCellsDialog(_:)), "i", [.control]),
+            item("Rows", #selector(GridView.insertRows(_:))),
             item("Columns", #selector(GridView.insertColumns(_:))),
             item("Sheet", #selector(W.addSheet(_:)), "n", [.command, .shift]),
             .separator(),
@@ -150,6 +164,7 @@ enum Menus {
             .separator(),
             submenu("Row", [
                 item("Height…", #selector(GridView.rowHeight(_:))),
+                item("AutoFit", #selector(GridView.autofitSelectedRows(_:))),
                 item("Hide", #selector(GridView.hideRows(_:)), "9", [.control]),
                 item("Unhide", #selector(GridView.unhideRows(_:)), "9", [.control, .shift]),
             ]),
@@ -176,6 +191,9 @@ enum Menus {
             .separator(),
             item("Filter", #selector(GridView.toggleFilter(_:)), "f", [.command, .shift], symbol: "line.3.horizontal.decrease.circle"),
             .separator(),
+            item("Remove Duplicates…", #selector(GridView.removeDuplicates(_:))),
+            item("Text to Columns…", #selector(GridView.textToColumns(_:))),
+            .separator(),
             item("Calculate Now", #selector(GridView.recalculate(_:)), "=", [.command]),
         ]))
 
@@ -201,7 +219,9 @@ enum Menus {
     static func cellMenu() -> NSMenu {
         let m = NSMenu()
         [item("Cut", #selector(NSText.cut(_:))), item("Copy", #selector(NSText.copy(_:))),
-         item("Paste", #selector(NSText.paste(_:))), item("Paste Values", #selector(GridView.pasteValues(_:))),
+         item("Paste", #selector(NSText.paste(_:))), item("Paste Special…", #selector(GridView.pasteSpecial(_:))),
+         .separator(),
+         item("Insert…", #selector(GridView.insertCellsDialog(_:))), item("Delete…", #selector(GridView.deleteCellsDialog(_:))),
          .separator(),
          item("Insert Rows", #selector(GridView.insertRows(_:))), item("Insert Columns", #selector(GridView.insertColumns(_:))),
          item("Delete Rows", #selector(GridView.deleteRows(_:))), item("Delete Columns", #selector(GridView.deleteColumns(_:))),
@@ -252,15 +272,18 @@ enum Menus {
 enum NumberFormats {
     struct F { let title: String; let code: String }
     static var all: [F] {
-        let it = Locale.current.language.languageCode?.identifier != "en" || Locale.current.region?.identifier != "US"
+        let loc = FormulaLocale.current.locale
         let cur = Locale.current.currencySymbol ?? "€"
+        let shortDate = loc == "en" ? "m/d/yyyy" : (loc == "de" ? "dd.mm.yyyy" : "dd/mm/yyyy")
+        let longDate = loc.hasPrefix("en") ? "dddd, mmmm d, yyyy" : "dddd d mmmm yyyy"
+        let prefixCurrency = cur == "$" || cur == "£"
         return [
             F(title: L("General"), code: "general"),
             F(title: L("Number"), code: "#,##0.00"),
-            F(title: L("Currency"), code: cur == "$" ? "$#,##0.00" : "#,##0.00 \"\(cur)\""),
+            F(title: L("Currency"), code: prefixCurrency ? "\(cur)#,##0.00" : "#,##0.00 \"\(cur)\""),
             F(title: L("Accounting"), code: cur == "$" ? "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)" : "_-* #,##0.00 \"\(cur)\"_-;-* #,##0.00 \"\(cur)\"_-;_-* \"-\"?? \"\(cur)\"_-;_-@_-"),
-            F(title: L("Short Date"), code: it ? "dd/mm/yyyy" : "m/d/yyyy"),
-            F(title: L("Long Date"), code: it ? "dddd d mmmm yyyy" : "dddd, mmmm d, yyyy"),
+            F(title: L("Short Date"), code: shortDate),
+            F(title: L("Long Date"), code: longDate),
             F(title: L("Time"), code: "hh:mm:ss"),
             F(title: L("Percentage"), code: "0.00%"),
             F(title: L("Fraction"), code: "# ?/?"),

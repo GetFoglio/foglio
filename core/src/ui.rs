@@ -1076,3 +1076,58 @@ pub extern "C" fn foglio_paste_styles(b: *mut FoglioBook, sheet: u32, r0: i32, c
     b.style_cache.clear();
     r
 }
+
+// ---------- remove duplicates ----------
+
+/// Excel's Data ▸ Remove Duplicates over all columns of the range: keeps the first occurrence of each row,
+/// packs the kept rows to the top (formulas adjusted, styles kept) and clears the rest. Returns rows removed.
+#[no_mangle]
+pub extern "C" fn foglio_remove_duplicates(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    let r = guard(-1, || {
+        let (r0, r1, c0, c1) = (r0.min(r1), r0.max(r1), c0.min(c1), c0.max(c1));
+        let model = b.model.get_model();
+        let mut seen = std::collections::HashSet::new();
+        let mut keep = Vec::new();
+        for r in r0..=r1 {
+            let key: Vec<String> = (c0..=c1)
+                .map(|c| b.model.get_formatted_cell_value(sheet, r, c).unwrap_or_default().to_lowercase())
+                .collect();
+            if seen.insert(key) {
+                keep.push(r);
+            }
+        }
+        let removed = (r1 - r0 + 1) as usize - keep.len();
+        if removed == 0 {
+            return 0;
+        }
+        let mut data = serde_json::Map::new();
+        for (i, src) in keep.iter().enumerate() {
+            let dst = r0 + i as i32;
+            let mut row = serde_json::Map::new();
+            for c in c0..=c1 {
+                let text = match model.get_cell_formula(sheet, *src, c) {
+                    Ok(Some(_)) => model.extend_to(sheet, *src, c, dst, c).unwrap_or_default(),
+                    _ => b.model.get_cell_content(sheet, *src, c).unwrap_or_default(),
+                };
+                let style = b.model.get_cell_style(sheet, *src, c).unwrap_or_default();
+                row.insert(c.to_string(), json!({"text": text, "is_spill": false, "style": style, "link": null}));
+            }
+            data.insert(dst.to_string(), Value::Object(row));
+        }
+        let new_last = r0 + keep.len() as i32 - 1;
+        let Ok(data) = serde_json::from_value::<ClipboardData>(Value::Object(data)) else { return -1 };
+        if select(b, sheet, r0, c0, new_last, c1).is_err() {
+            return -1;
+        }
+        if b.model.paste_from_clipboard(sheet, (r0, c0, new_last, c1), &data, false).is_err() {
+            return -1;
+        }
+        let rest = area(sheet, new_last + 1, c0, r1, c1);
+        let _ = b.model.range_clear_contents(&rest);
+        let _ = b.model.range_clear_formatting(&rest);
+        removed as i32
+    });
+    b.style_cache.clear();
+    r
+}

@@ -17,6 +17,12 @@ final class SpreadsheetDocument: NSDocument {
     override class var preservesVersions: Bool { false }
     override var autosavingFileType: String? { FileTypes.xlsx }
 
+    override init() {
+        super.init()
+        // Sensible spreadsheet margins by default; Page Setup changes are kept.
+        printInfo.topMargin = 36; printInfo.bottomMargin = 36; printInfo.leftMargin = 30; printInfo.rightMargin = 30
+    }
+
     override func makeWindowControllers() {
         addWindowController(SheetWindowController(document: self))
     }
@@ -95,7 +101,6 @@ final class SpreadsheetDocument: NSDocument {
         guard let wc = windowController else { throw EngineError(message: L("Nothing to print.")) }
         let info = printInfo.copy() as! NSPrintInfo
         info.dictionary().addEntries(from: printSettings)
-        info.topMargin = 36; info.bottomMargin = 36; info.leftMargin = 30; info.rightMargin = 30
         let view = PrintView(book: book, sheet: wc.grid.sheet, selection: wc.grid.selection, printInfo: info)
         let op = NSPrintOperation(view: view, printInfo: info)
         op.jobTitle = displayName

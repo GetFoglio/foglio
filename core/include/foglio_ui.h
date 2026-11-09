@@ -77,3 +77,6 @@ int32_t foglio_clear_cf(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, i
 // Format Painter: remember the styles of a range, then apply them (tiled) to another range.
 int32_t foglio_copy_styles(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
 int32_t foglio_paste_styles(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
+
+// Data ▸ Remove Duplicates (all columns compared, first occurrence kept). Returns rows removed.
+int32_t foglio_remove_duplicates(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);

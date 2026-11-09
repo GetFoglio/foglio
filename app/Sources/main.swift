@@ -293,6 +293,15 @@ enum UIScript {
                 let g = c.grid!
                 let fr = g.window?.firstResponder
                 print("STATE active=\(columnName(g.active.col))\(g.active.row + 1) sel=\(g.selection.a1) editing=\(g.isEditing) pointing=\(g.isPointing) responder=\(fr.map { String(describing: type(of: $0)) } ?? "nil") text=\((fr as? NSTextView)?.string ?? "")")
+            case "dragborder": // dragborder B2 C5: grab the selection outline at its top edge and drop it on C5
+                guard let w = c.window else { break }
+                let p = arg.split(separator: " ").map(String.init)
+                guard p.count == 2, let a = parseA1(p[0]), let b = parseA1(p[1]) else { break }
+                let start = c.grid.borderWindowPoint(for: a), end = c.grid.borderWindowPoint(for: b)
+                for (t, pt) in [(NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end)] {
+                    if let e = NSEvent.mouseEvent(with: t, location: pt, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { NSApp.sendEvent(e) }
+                }
             case "drag", "filldrag": // drag A1 C3  (filldrag starts at the selection's fill handle)
                 guard let w = c.window else { break }
                 let p = arg.split(separator: " ").map(String.init)
@@ -318,6 +327,13 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "shiftcells": // shiftcells insert down | delete right …
+                let p = arg.split(separator: " ")
+                if p.count == 2 { c.grid.shiftCells(insert: p[0] == "insert", horizontal: p[1] == "right") }
+            case "transpose": c.grid.pasteTransposed()
+            case "removedups": c.grid.removeDuplicates(nil)
+            case "insertrows": c.grid.insertRows(nil)
+            case "showformulas": c.grid.toggleShowFormulas(nil)
             case "recalc": c.grid.recalculate(nil)
             case "painter": c.formatPainter(nil)
             case "styleof": if let ref = parseA1(arg) { let st = c.grid.book.style(sheet: c.grid.sheet, row: ref.row, col: ref.col); print("STYLE \(arg) bold=\(st.bold) bg=\(String(st.bg, radix: 16))") }

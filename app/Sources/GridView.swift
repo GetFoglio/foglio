@@ -130,6 +130,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private(set) var cutRange: (sheet: Int, range: GridRange)?
     /// Size of the last internal copy, clamped to the used range like the engine does.
     private var copied: (token: UInt64, rows: Int, cols: Int)?
+    private var copiedSource: (sheet: Int, range: GridRange)?
 
     // Editing ---------------------------------------------------------------
     enum EditMode { case enter, edit }
@@ -148,7 +149,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private enum Drag {
         case none, select, fill(GridRange), resizeCol(Int, CGFloat, CGFloat), resizeRow(Int, CGFloat, CGFloat)
         case point, cols(Int), rows(Int)
+        case move(GridRange, CellRef)   // dragging the selection border: source, grabbed cell
     }
+    private var moveTarget: GridRange?
+    private var tabStartCol: Int?
+    /// Last formatting/structure command, for Edit ▸ Repeat (⌘Y).
+    private var lastRepeatable: ((GridView) -> Void)?
+    /// View ▸ Show Formulas (⌃`).
+    var showFormulas = false { didSet { invalidateData() } }
+    private var lastEditorLength = 0
     private var drag = Drag.none
     private var fillTarget: GridRange?
     private var autoscrollTimer: Timer?
@@ -313,6 +322,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let vis = GridRange(r0: rows.lowerBound, c0: cols.lowerBound, r1: rows.upperBound, c1: cols.upperBound)
         for m in geo.merges where m.intersects(vis) && !(rows.contains(m.r0) && (c0...c1).contains(m.c0)) {
             cells += book.viewport(sheet: sheet, rows: m.r0...m.r0, cols: m.c0...m.c0)
+        }
+        if showFormulas {
+            cells = cells.map { c in
+                let input = book.input(sheet: sheet, row: c.row, col: c.col)
+                guard input.hasPrefix("=") else { return c }
+                return VCell(row: c.row, col: c.col, text: input, kind: 0, align: 1, bold: c.bold, italic: c.italic, fg: c.fg, bg: c.bg,
+                             fontSize: c.fontSize, underline: c.underline, strike: c.strike, wrap: false, valign: c.valign,
+                             borderMask: c.borderMask, borderWeight: c.borderWeight, borderColors: c.borderColors)
+            }
         }
         let d = CellData(cells)
         if dataCache.count > 16 { dataCache.removeAll() }
@@ -617,7 +635,18 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     /// Enter/Tab inside a multi-cell selection move the active cell within it (Excel behaviour).
     private func advance(_ dr: Int, _ dc: Int) {
         let s = selection
-        guard !s.isSingle, mergeAt(active, geo) != s else { move(dr, dc); return }
+        if s.isSingle || mergeAt(active, geo) == s {
+            // Excel: Tab, Tab, … then Return goes to the next row under the cell where the Tab run started.
+            if dc != 0 && dr == 0 { tabStartCol = tabStartCol ?? active.col; move(dr, dc); return }
+            if dr == 1, let start = tabStartCol {
+                tabStartCol = nil
+                select(CellRef(row: geo.rows.step(active.row, by: 1), col: start))
+                return
+            }
+            tabStartCol = nil
+            move(dr, dc)
+            return
+        }
         let g = geo
         var r = active.row, c = active.col
         for _ in 0..<min(s.cellCount, 100_000) {
@@ -712,10 +741,26 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         return nil
     }
 
+    /// True when p is on the selection's outline (where Excel shows the move cursor).
+    private func onSelectionBorder(_ p: CGPoint, _ g: Geo) -> Bool {
+        let r = rangeRect(selection, g)
+        guard r.insetBy(dx: -4, dy: -4).contains(p) else { return false }
+        return !r.insetBy(dx: 3, dy: 3).contains(p) && selection.cellCount < 5_000_000
+    }
+
     override func resetCursorRects() {
         let g = geo
         let z = zoom
         func scaled(_ r: CGRect) -> CGRect { CGRect(x: r.minX * z, y: r.minY * z, width: r.width * z, height: r.height * z) }
+        if !isEditing && !selection.isFullColumns && !selection.isFullRows {
+            let r = rangeRect(selection, g).intersection(CGRect(x: headerW, y: headerH, width: viewSize.width, height: viewSize.height))
+            if !r.isNull {
+                for edge in [CGRect(x: r.minX - 3, y: r.minY - 3, width: r.width + 6, height: 6), CGRect(x: r.minX - 3, y: r.maxY - 3, width: r.width + 6, height: 6),
+                             CGRect(x: r.minX - 3, y: r.minY - 3, width: 6, height: r.height + 6), CGRect(x: r.maxX - 3, y: r.minY - 3, width: 6, height: r.height + 6)] {
+                    addCursorRect(scaled(edge), cursor: .openHand)
+                }
+            }
+        }
         if formatPainterArmed {
             addCursorRect(scaled(CGRect(x: headerW, y: headerH, width: viewSize.width, height: viewSize.height)), cursor: .dragCopy)
         }
@@ -771,6 +816,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if inRowHeader, let r = rowBoundary(at: p, g) {
             if e.clickCount == 2 { setRowHeights(r...r, px: nil); return }
             drag = .resizeRow(r, p.y, g.rows.size(r))
+            return
+        }
+        tabStartCol = nil
+        if !inColHeader && !inRowHeader && p.x > headerW && p.y > headerH && !fillHandleRect(g).insetBy(dx: -3, dy: -3).contains(p),
+           onSelectionBorder(p, g) {
+            drag = .move(selection, cellAt(p, g))
             return
         }
         if !inColHeader && !inRowHeader && fillHandleRect(g).insetBy(dx: -3, dy: -3).contains(p) && p.x > headerW && p.y > headerH {
@@ -857,6 +908,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             else if best == up { fillTarget = GridRange(r0: c.row, c0: s.c0, r1: s.r1, c1: s.c1) }
             else { fillTarget = GridRange(r0: s.r0, c0: c.col, r1: s.r1, c1: s.c1) }
             needsDisplay = true
+        case .move(let src, let grab):
+            let dr = c.row - grab.row, dc = c.col - grab.col
+            let t = GridRange(r0: src.r0 + dr, c0: src.c0 + dc, r1: src.r1 + dr, c1: src.c1 + dc)
+            moveTarget = (t.r0 >= 0 && t.c0 >= 0 && t.r1 < Sheet.maxRows && t.c1 < Sheet.maxCols && t != src) ? t : nil
+            fillTarget = moveTarget
+            needsDisplay = true
         case .resizeCol(let i, let x0, let s0):
             resizePreview = (true, i, max(0, (s0 + p.x - x0).rounded()))
             needsDisplay = true
@@ -886,6 +943,18 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             contentChanged()
         }
         switch drag {
+        case .move(let src, _):
+            if let t = moveTarget {
+                // Drag = move (cut/paste), ⌥-drag = copy, exactly like Excel.
+                let copyInstead = e.modifierFlags.contains(.option)
+                if let c = book.copy(sheet: sheet, src) {
+                    _ = book.pasteInternal(sheet: sheet, t, token: c.token, cut: !copyInstead)
+                    lastRepeatable = nil
+                    select(range: t, active: CellRef(row: t.r0, col: t.c0))
+                    contentChanged()
+                }
+            }
+            moveTarget = nil
         case .fill(let s):
             if let t = fillTarget {
                 if t.r1 > s.r1 { book.autofill(sheet: sheet, s, toRow: t.r1, toCol: nil) }
@@ -997,6 +1066,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         f.layer?.borderWidth = 2
         overlay = f
         editMode = mode
+        lastEditorLength = (f.stringValue as NSString).length
         startSession(field: f)
         addSubview(f)
         positionEditor()
@@ -1163,12 +1233,38 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     func controlTextDidChange(_ n: Notification) {
         guard let f = n.object as? NSTextField, f === editField else { return }
+        if f === overlay, editMode == .enter { autoCompleteFromColumn(f) }
         session?.textChanged()
         delegate?.gridModeChanged(self)
         if f === overlay {
             positionEditor()
             delegate?.gridEditingTextChanged(self, text: f.stringValue)
         }
+    }
+
+    /// Excel AutoComplete: typing the start of a text that already exists in the column proposes the rest (selected).
+    private func autoCompleteFromColumn(_ f: NSTextField) {
+        guard let ed = f.currentEditor() else { return }
+        let typed = ed.string
+        let len = (typed as NSString).length
+        defer { lastEditorLength = len }
+        guard len > lastEditorLength, len >= 1, !typed.hasPrefix("="), Double(typed.replacingOccurrences(of: ",", with: ".")) == nil,
+              ed.selectedRange.location == len else { return }
+        let g = geo
+        let r0 = max(0, editTarget.row - 3000), r1 = min(g.maxRow, editTarget.row + 3000)
+        guard r0 <= r1 else { return }
+        let values = book.viewport(sheet: sheet, rows: r0...r1, cols: editTarget.col...editTarget.col)
+            .filter { $0.kind == 0 && $0.row != editTarget.row && !$0.text.isEmpty }.map(\.text)
+        let lower = typed.lowercased()
+        var matches = Set<String>()
+        for v in values where v.lowercased().hasPrefix(lower) && v.count > typed.count {
+            matches.insert(v.lowercased())
+            if matches.count > 1 { return }
+        }
+        guard let m = matches.first, let full = values.first(where: { $0.lowercased() == m }) else { return }
+        let suffix = String(full.dropFirst(typed.count))
+        ed.string = typed + suffix
+        ed.selectedRange = NSRange(location: len, length: (suffix as NSString).length)
     }
 
     func controlTextDidBeginEditing(_ n: Notification) {
@@ -1235,6 +1331,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         pb.setString("\(token)", forType: GridView.pasteboardType)
         let g = geo, s = selection
         copied = (token, max(s.r0, min(s.r1, g.maxRow)) - s.r0 + 1, max(s.c0, min(s.c1, g.maxCol)) - s.c0 + 1)
+        copiedSource = (sheet, GridRange(r0: s.r0, c0: s.c0, r1: s.r0 + copied!.rows - 1, c1: s.c0 + copied!.cols - 1))
         cutRange = cut ? (sheet, selection) : nil
         needsDisplay = true
     }
@@ -1249,6 +1346,18 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             if let c = copied, c.token == token { h = c.rows; w = c.cols }
             let anchor = selection.isSingle ? active : CellRef(row: selection.r0, col: selection.c0)
             let target = GridRange(r0: anchor.row, c0: anchor.col, r1: min(Sheet.maxRows - 1, anchor.row + h - 1), c1: min(Sheet.maxCols - 1, anchor.col + w - 1))
+            // A copied block pasted onto a selection that is an exact multiple of it is repeated (Excel).
+            let sel = selection
+            if !sel.isSingle && cutRange == nil && sel.rows % h == 0 && sel.cols % w == 0 && sel.cellCount > h * w
+                && (sel.rows / h) * (sel.cols / w) <= 2_000 {
+                for r in stride(from: sel.r0, through: sel.r1, by: h) {
+                    for c in stride(from: sel.c0, through: sel.c1, by: w) {
+                        _ = book.pasteInternal(sheet: sheet, GridRange(r0: r, c0: c, r1: r + h - 1, c1: c + w - 1), token: token, cut: false)
+                    }
+                }
+                contentChanged()
+                return
+            }
             if book.pasteInternal(sheet: sheet, target, token: token, cut: cutRange != nil) {
                 cutRange = nil
                 select(range: target, active: active)
@@ -1275,10 +1384,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     // Rows / columns
     @objc func insertRows(_ sender: Any?) {
         commitIfEditing(); clearFilterState()
+        lastRepeatable = { $0.insertRows(nil) }
         book.insertRows(sheet: sheet, at: selection.r0, count: selection.isFullColumns ? 1 : selection.rows); contentChanged()
     }
     @objc func insertColumns(_ sender: Any?) {
         commitIfEditing(); clearFilterState()
+        lastRepeatable = { $0.insertColumns(nil) }
         book.insertCols(sheet: sheet, at: selection.c0, count: selection.isFullRows ? 1 : selection.cols); contentChanged()
     }
     @objc func deleteRows(_ sender: Any?) {
@@ -1340,6 +1451,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         }
     }
     @objc func autofitSelectedColumns(_ sender: Any?) { autofitColumns(selection.c0...selection.c1) }
+    @objc func autofitSelectedRows(_ sender: Any?) {
+        commitIfEditing()
+        let g = geo
+        let r1 = min(selection.r1, g.maxRow)
+        guard selection.r0 <= r1 else { return }
+        book.setRowHeight(sheet: sheet, selection.r0, r1, px: 25)   // back to default, then grow to fit content
+        fitRowHeights(selection.r0...r1)
+        contentChanged()
+    }
 
     func autofitColumns(_ cols: ClosedRange<Int>) {
         let g = geo
@@ -1492,6 +1612,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     func setStyle(_ path: String, _ value: String) {
         commitIfEditing()
+        lastRepeatable = { $0.setStyle(path, value) }
         book.setStyle(sheet: sheet, selection, path: path, value: value)
         if path == "alignment.wrap_text" || path == "font.size" { fitRowHeights(selection.r0...min(selection.r1, selection.r0 + 500)) }
         contentChanged()
@@ -1522,6 +1643,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     func setBorder(_ kind: String, style: String = "thin") {
         commitIfEditing()
+        lastRepeatable = { $0.setBorder(kind, style: style) }
         book.setBorder(sheet: sheet, selection, kind: kind, style: style)
         contentChanged()
     }
@@ -1568,6 +1690,11 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             let g = geo
             item.title = g.fr > 0 || g.fc > 0 ? L("Unfreeze Panes") : L("Freeze Panes")
             return true
+        case #selector(toggleShowFormulas(_:)):
+            item.state = showFormulas ? .on : .off
+            return true
+        case #selector(repeatLastAction(_:)):
+            return lastRepeatable != nil && !isEditing
         case #selector(toggleFilter(_:)):
             item.state = filters[sheet] != nil ? .on : .off
             return true
@@ -1682,6 +1809,186 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         contentChanged()
     }
 
+    // MARK: Excel commands: repeat, paste special, insert/delete cells, show formulas, text to columns
+
+    @objc func repeatLastAction(_ sender: Any?) {
+        guard let a = lastRepeatable else { NSSound.beep(); return }
+        a(self)
+    }
+
+    @objc func toggleShowFormulas(_ sender: Any?) { showFormulas.toggle() }
+
+    @objc func pasteSpecial(_ sender: Any?) {
+        commitIfEditing()
+        guard let w = window else { return }
+        let a = NSAlert()
+        a.messageText = L("Paste Special")
+        let options = [L("All"), L("Values"), L("Formats"), L("Values (Transpose)")]
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        var radios: [NSButton] = []
+        for (i, o) in options.enumerated() {
+            let r = NSButton(radioButtonWithTitle: o, target: nil, action: nil)
+            r.tag = i
+            r.state = i == 0 ? .on : .off
+            radios.append(r)
+            stack.addArrangedSubview(r)
+        }
+        for r in radios { r.target = self; r.action = #selector(radioNoop(_:)) }
+        stack.frame = NSRect(x: 0, y: 0, width: 240, height: CGFloat(options.count) * 24)
+        a.accessoryView = stack
+        a.addButton(withTitle: L("OK"))
+        a.addButton(withTitle: L("Cancel"))
+        a.beginSheetModal(for: w) { [weak self] resp in
+            guard let self, resp == .alertFirstButtonReturn else { return }
+            switch radios.firstIndex(where: { $0.state == .on }) ?? 0 {
+            case 1: self.pasteValues(nil)
+            case 2:
+                guard let src = self.copiedSource else { NSSound.beep(); return }
+                if src.sheet == self.sheet || true {
+                    let target = self.selection.isSingle
+                        ? GridRange(r0: self.active.row, c0: self.active.col, r1: self.active.row + src.range.rows - 1, c1: self.active.col + src.range.cols - 1)
+                        : self.selection
+                    let current = self.sheet
+                    self.book.copyStyles(sheet: src.sheet, src.range)
+                    self.book.pasteStyles(sheet: current, target)
+                    self.select(range: target, active: self.active)
+                    self.contentChanged()
+                }
+            case 3: self.pasteTransposed()
+            default: self.paste(nil)
+            }
+        }
+    }
+    @objc private func radioNoop(_ sender: NSButton) {
+        for v in sender.superview?.subviews ?? [] { (v as? NSButton)?.state = v === sender ? .on : .off }
+    }
+
+    func pasteTransposed() {
+        guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else { return }
+        let rows = s.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .newlines)
+            .components(separatedBy: "\n").map { $0.components(separatedBy: "\t") }
+        let w = rows.map(\.count).max() ?? 0
+        guard w > 0 else { return }
+        let t = (0..<w).map { c in rows.map { c < $0.count ? $0[c] : "" }.joined(separator: "\t") }.joined(separator: "\n")
+        book.pasteText(sheet: sheet, row: active.row, col: active.col, t)
+        select(range: GridRange(r0: active.row, c0: active.col, r1: active.row + w - 1, c1: active.col + rows.count - 1), active: active)
+        contentChanged()
+    }
+
+    @objc func insertCellsDialog(_ sender: Any?) { cellsDialog(insert: true) }
+    @objc func deleteCellsDialog(_ sender: Any?) { cellsDialog(insert: false) }
+
+    private func cellsDialog(insert: Bool) {
+        commitIfEditing()
+        if selection.isFullRows { insert ? insertRows(nil) : deleteRows(nil); return }
+        if selection.isFullColumns { insert ? insertColumns(nil) : deleteColumns(nil); return }
+        guard let w = window else { return }
+        let a = NSAlert()
+        a.messageText = insert ? L("Insert") : L("Delete")
+        let titles = insert ? [L("Shift cells right"), L("Shift cells down"), L("Entire row"), L("Entire column")]
+                            : [L("Shift cells left"), L("Shift cells up"), L("Entire row"), L("Entire column")]
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        var radios: [NSButton] = []
+        for (i, t) in titles.enumerated() {
+            let r = NSButton(radioButtonWithTitle: t, target: self, action: #selector(radioNoop(_:)))
+            r.state = i == 1 ? .on : .off
+            radios.append(r)
+            stack.addArrangedSubview(r)
+        }
+        stack.frame = NSRect(x: 0, y: 0, width: 240, height: 100)
+        a.accessoryView = stack
+        a.addButton(withTitle: L("OK"))
+        a.addButton(withTitle: L("Cancel"))
+        a.beginSheetModal(for: w) { [weak self] resp in
+            guard let self, resp == .alertFirstButtonReturn else { return }
+            let choice = radios.firstIndex(where: { $0.state == .on }) ?? 1
+            switch (insert, choice) {
+            case (_, 2): insert ? self.insertRows(nil) : self.deleteRows(nil)
+            case (_, 3): insert ? self.insertColumns(nil) : self.deleteColumns(nil)
+            default: self.shiftCells(insert: insert, horizontal: choice == 0)
+            }
+        }
+    }
+
+    /// Insert/delete cells by moving the block beside the selection (cut/paste keeps formulas and formats).
+    func shiftCells(insert: Bool, horizontal: Bool) {
+        let s = selection, g = geo
+        clearFilterState()
+        if horizontal {
+            let lastCol = g.maxCol
+            if insert {
+                if s.c0 <= lastCol, let c = book.copy(sheet: sheet, GridRange(r0: s.r0, c0: s.c0, r1: s.r1, c1: lastCol)) {
+                    _ = book.pasteInternal(sheet: sheet, GridRange(r0: s.r0, c0: s.c0 + s.cols, r1: s.r1, c1: lastCol + s.cols), token: c.token, cut: true)
+                }
+            } else {
+                book.clear(sheet: sheet, s); book.clearFormats(sheet: sheet, s)
+                if s.c1 + 1 <= lastCol, let c = book.copy(sheet: sheet, GridRange(r0: s.r0, c0: s.c1 + 1, r1: s.r1, c1: lastCol)) {
+                    _ = book.pasteInternal(sheet: sheet, GridRange(r0: s.r0, c0: s.c0, r1: s.r1, c1: lastCol - s.cols), token: c.token, cut: true)
+                }
+            }
+        } else {
+            let lastRow = g.maxRow
+            if insert {
+                if s.r0 <= lastRow, let c = book.copy(sheet: sheet, GridRange(r0: s.r0, c0: s.c0, r1: lastRow, c1: s.c1)) {
+                    _ = book.pasteInternal(sheet: sheet, GridRange(r0: s.r0 + s.rows, c0: s.c0, r1: lastRow + s.rows, c1: s.c1), token: c.token, cut: true)
+                }
+            } else {
+                book.clear(sheet: sheet, s); book.clearFormats(sheet: sheet, s)
+                if s.r1 + 1 <= lastRow, let c = book.copy(sheet: sheet, GridRange(r0: s.r1 + 1, c0: s.c0, r1: lastRow, c1: s.c1)) {
+                    _ = book.pasteInternal(sheet: sheet, GridRange(r0: s.r0, c0: s.c0, r1: lastRow - s.rows, c1: s.c1), token: c.token, cut: true)
+                }
+            }
+        }
+        select(range: s, active: active)
+        contentChanged()
+    }
+
+    @objc func textToColumns(_ sender: Any?) {
+        commitIfEditing()
+        guard let w = window, let data = dataRange(), data.cols == 1 || selection.cols == 1 else { NSSound.beep(); return }
+        let col = selection.c0
+        let a = NSAlert()
+        a.messageText = L("Text to Columns")
+        a.informativeText = L("Split the text of the selected column into several columns using:")
+        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+        let seps: [(String, String)] = [(L("Semicolon"), ";"), (L("Comma"), ","), (L("Tab"), "\t"), (L("Space"), " "), ("|", "|"), ("-", "-"), ("/", "/")]
+        seps.forEach { pop.addItem(withTitle: $0.0) }
+        a.accessoryView = pop
+        a.addButton(withTitle: L("OK"))
+        a.addButton(withTitle: L("Cancel"))
+        let r0 = selection.isSingle ? data.r0 : selection.r0, r1 = min(selection.isSingle ? data.r1 : selection.r1, geo.maxRow)
+        guard r0 <= r1 else { return }
+        a.beginSheetModal(for: w) { [weak self] resp in
+            guard let self, resp == .alertFirstButtonReturn else { return }
+            let sep = seps[pop.indexOfSelectedItem].1
+            var lines: [String] = []
+            for r in r0...r1 {
+                let v = self.book.input(sheet: self.sheet, row: r, col: col)
+                let parts = sep == " " ? v.split(separator: " ").map(String.init) : v.components(separatedBy: sep)
+                lines.append(parts.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\t"))
+            }
+            self.book.pasteText(sheet: self.sheet, row: r0, col: col, lines.joined(separator: "\n"))
+            self.contentChanged()
+        }
+    }
+
+    @objc func removeDuplicates(_ sender: Any?) {
+        commitIfEditing()
+        guard var r = dataRange(), r.rows > 1 else { NSSound.beep(); return }
+        if hasHeader(r) { r.r0 += 1 }
+        let removed = book.removeDuplicates(sheet: sheet, r)
+        contentChanged()
+        guard let w = window else { return }
+        let a = NSAlert()
+        a.messageText = removed > 0 ? String(format: L("%d duplicate rows removed; %d unique rows remain."), removed, r.rows - removed)
+                                    : L("No duplicate values found.")
+        a.beginSheetModal(for: w)
+    }
+
     // Find support
     func find(_ q: String, flags: UInt32) -> Bool {
         guard let hit = book.find(sheet: sheet, after: active, q, flags: flags) else { NSSound.beep(); return false }
@@ -1694,6 +2001,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let r = cellRect(c.row, c.col, geo)
         let viewPoint = NSPoint(x: r.midX * zoom, y: r.midY * zoom)
         return convert(viewPoint, to: nil)
+    }
+
+    /// A point on the top edge of a cell (where the selection outline is), in window coordinates.
+    func borderWindowPoint(for c: CellRef) -> NSPoint {
+        let r = cellRect(c.row, c.col, geo)
+        return convert(NSPoint(x: r.midX * zoom, y: (r.minY + 1) * zoom), to: nil)
     }
 
     func fillHandleWindowPoint() -> NSPoint {

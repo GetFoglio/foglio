@@ -211,6 +211,12 @@ final class Workbook {
     /// mode: 0 unmerge, 1 merge, 2 merge & center
     func merge(sheet: Int, _ r: GridRange, mode: Int32) { _ = foglio_merge(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c, mode); changed() }
 
+    func removeDuplicates(sheet: Int, _ r: GridRange) -> Int {
+        let n = Int(foglio_remove_duplicates(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c))
+        changed()
+        return max(0, n)
+    }
+
     // MARK: format painter
     func copyStyles(sheet: Int, _ r: GridRange) { _ = foglio_copy_styles(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c) }
     func pasteStyles(sheet: Int, _ r: GridRange) { _ = foglio_paste_styles(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c); changed() }

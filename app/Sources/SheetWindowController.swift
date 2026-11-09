@@ -15,9 +15,42 @@ final class FormulaBarField: NSTextField {
 final class SheetTab: NSButton {
     var onDoubleClick: (() -> Void)?
     var contextMenu: (() -> NSMenu)?
+    var tabColor: NSColor?
+    var isCurrent = false { didSet { needsDisplay = true } }
+    private var hover = false { didSet { needsDisplay = true } }
+
     override func mouseDown(with e: NSEvent) {
         if e.clickCount == 2 { onDoubleClick?(); return }
         super.mouseDown(with: e)
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hover = true }
+    override func mouseExited(with event: NSEvent) { hover = false }
+    override var intrinsicContentSize: NSSize {
+        let w = (title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).width
+        return NSSize(width: max(56, ceil(w) + 26), height: 24)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 0, dy: 1)
+        if isCurrent {
+            NSColor.textBackgroundColor.setFill()
+            NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4).fill()
+            NSColor.separatorColor.setStroke()
+            NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).stroke()
+            (tabColor ?? NSColor.controlAccentColor).setFill()
+            NSBezierPath(roundedRect: NSRect(x: r.minX + 6, y: isFlipped ? r.maxY - 3.5 : r.minY + 1, width: r.width - 12, height: 2.5), xRadius: 1, yRadius: 1).fill()
+        } else {
+            if hover { NSColor.quaternaryLabelColor.setFill(); NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4).fill() }
+            if let c = tabColor { c.setFill(); NSRect(x: r.minX + 6, y: isFlipped ? r.maxY - 3.5 : r.minY + 1, width: r.width - 12, height: 2.5).fill() }
+        }
+        let font = NSFont.systemFont(ofSize: 12, weight: isCurrent ? .semibold : .regular)
+        let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: isCurrent ? NSColor.labelColor : NSColor.secondaryLabelColor]
+        let sz = (title as NSString).size(withAttributes: a)
+        (title as NSString).draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: (bounds.height - sz.height) / 2), withAttributes: a)
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         performClick(nil)
@@ -43,8 +76,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     private var alignButtons: [NSButton] = []
     private let fontSizeBox = NSComboBox()
     private let numberFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let textColorWell = NSColorWell(style: .minimal)
-    private let fillColorWell = NSColorWell(style: .minimal)
+    private let textColor = ColorButton(symbol: "textformat", tip: L("Font Color"), initial: NSColor(srgbRed: 0.75, green: 0, blue: 0, alpha: 1),
+                                        allowsNone: true, noneTitle: L("Automatic"))
+    private let fillColor = ColorButton(symbol: "drop.halffull", tip: L("Fill Color"), initial: NSColor(srgbRed: 1, green: 0.92, blue: 0.61, alpha: 1),
+                                        allowsNone: true, noneTitle: L("No Fill"))
     private var gridConstraints: [NSLayoutConstraint] = []
     private var formulaBar: NSView!
     private var bottomBar: NSView!
@@ -124,47 +159,41 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         ])
     }
 
-    private func button(_ symbol: String, _ tip: String, _ action: Selector, toggle: Bool = false) -> NSButton {
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: L(tip)) ?? NSImage()
-        let b = NSButton(image: img, target: self, action: action)
-        b.title = ""
-        b.imagePosition = .imageOnly
-        b.setAccessibilityLabel(L(tip))
-        b.bezelStyle = .accessoryBarAction
-        b.showsBorderOnlyWhileMouseInside = !toggle
-        if toggle { b.setButtonType(.pushOnPushOff) }
-        b.toolTip = L(tip)
-        b.imageScaling = .scaleProportionallyDown
-        b.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        b.heightAnchor.constraint(equalToConstant: 24).isActive = true
+    private func button(_ symbol: String, _ tip: String, _ action: Selector, toggle: Bool = false, responderChain: Bool = false) -> NSButton {
+        let b = ToolbarKit.button(image: ToolbarKit.symbol(symbol, L(tip)), tip: L(tip), target: responderChain ? nil : self,
+                                  action: action, toggle: toggle)
         return b
     }
 
-    private func group(_ views: [NSView], priority: NSStackView.VisibilityPriority = .mustHold) -> NSStackView {
+    private func textButton(_ text: String, _ tip: String, _ action: Selector) -> NSButton {
+        ToolbarKit.button(image: ToolbarKit.textImage(text), tip: L(tip), target: self, action: action)
+    }
+
+    private func group(_ views: [NSView]) -> NSStackView {
         let s = NSStackView(views: views)
-        s.spacing = 1
+        s.spacing = 2
         s.setHuggingPriority(.required, for: .horizontal)
         return s
     }
 
     private func divider() -> NSView {
         let b = NSBox(); b.boxType = .separator
-        b.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 20).isActive = true
         return b
     }
 
     private func makeFormatBar() -> NSView {
         let bar = NSStackView()
         bar.orientation = .horizontal
-        bar.spacing = 6
+        bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
         bar.detachesHiddenViews = true
 
         fontSizeBox.addItems(withObjectValues: [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72].map { "\($0)" })
         fontSizeBox.controlSize = .small
-        fontSizeBox.font = .systemFont(ofSize: 11)
+        fontSizeBox.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         fontSizeBox.numberOfVisibleItems = 14
-        fontSizeBox.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        fontSizeBox.widthAnchor.constraint(equalToConstant: 50).isActive = true
         fontSizeBox.target = self
         fontSizeBox.action = #selector(fontSizeChanged(_:))
         fontSizeBox.toolTip = L("Font Size")
@@ -174,86 +203,66 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         underlineButton = button("underline", "Underline (⌘U)", #selector(underlineAction(_:)), toggle: true)
         let strike = button("strikethrough", "Strikethrough", #selector(strikeAction(_:)))
 
-        textColorWell.color = .systemRed
-        textColorWell.target = self
-        textColorWell.action = #selector(textColorChanged(_:))
-        textColorWell.toolTip = L("Font Color")
-        fillColorWell.color = NSColor(srgbRed: 1, green: 0.95, blue: 0.6, alpha: 1)
-        fillColorWell.target = self
-        fillColorWell.action = #selector(fillColorChanged(_:))
-        fillColorWell.toolTip = L("Fill Color")
-        let textColorIcon = NSImageView(image: NSImage(systemSymbolName: "character", accessibilityDescription: nil)!)
-        let fillIcon = NSImageView(image: NSImage(systemSymbolName: "drop.fill", accessibilityDescription: nil)!)
-        for i in [textColorIcon, fillIcon] { i.contentTintColor = .secondaryLabelColor }
-        for w in [textColorWell, fillColorWell] { w.widthAnchor.constraint(equalToConstant: 38).isActive = true }
+        textColor.onPick = { [weak self] c in self?.grid.setStyle("font.color", c.map(self!.hex) ?? "") }
+        fillColor.onPick = { [weak self] c in self?.grid.setStyle("fill.fg_color", c.map(self!.hex) ?? "") }
 
-        let borders = NSPopUpButton(frame: .zero, pullsDown: true)
-        borders.bezelStyle = .accessoryBarAction
-        borders.isBordered = false
-        let head = NSMenuItem(); head.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: L("Borders"))
-        borders.menu?.addItem(head)
-        Menus.borderItems().forEach { $0.target = self; borders.menu?.addItem($0) }
-        borders.toolTip = L("Borders")
-        borders.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        let borders = MenuButton(image: ToolbarKit.symbol("square.grid.2x2", L("Borders")), tip: L("Borders")) { [weak self] in
+            let m = NSMenu()
+            Menus.borderItems().forEach { $0.target = self; m.addItem($0) }
+            return m
+        }
 
         alignButtons = [button("text.alignleft", "Align Left", #selector(alignLeft(_:)), toggle: true),
                         button("text.aligncenter", "Center", #selector(alignCenter(_:)), toggle: true),
                         button("text.alignright", "Align Right", #selector(alignRight(_:)), toggle: true)]
-        wrapButton = button("text.word.spacing", "Wrap Text", #selector(wrapAction(_:)), toggle: true)
-        let merge = button("rectangle.split.3x1", "Merge & Center", #selector(GridView.mergeAndCenter(_:)))
-        merge.target = nil
+        wrapButton = button("text.append", "Wrap Text", #selector(wrapAction(_:)), toggle: true)
+        let merge = button("rectangle.compress.vertical", "Merge & Center", #selector(GridView.mergeAndCenter(_:)), responderChain: true)
 
         numberFormatPopup.controlSize = .small
         numberFormatPopup.font = .systemFont(ofSize: 11)
         NumberFormats.all.forEach { numberFormatPopup.addItem(withTitle: $0.title) }
         numberFormatPopup.target = self
         numberFormatPopup.action = #selector(numberFormatPopupChanged(_:))
-        numberFormatPopup.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        numberFormatPopup.widthAnchor.constraint(equalToConstant: 112).isActive = true
         numberFormatPopup.toolTip = L("Number Format")
-        let percent = button("percent", "Percentage", #selector(percentAction(_:)))
-        let thousands = button("number", "Number", #selector(thousandsAction(_:)))
-        let incDec = button("increase.indent", "Increase Decimal", #selector(increaseDecimals(_:)))
-        let decDec = button("decrease.indent", "Decrease Decimal", #selector(decreaseDecimals(_:)))
+        let dec = FormulaLocale.current.locale.hasPrefix("en") ? "." : ","
+        let currency = textButton(Locale.current.currencySymbol ?? "€", "Currency", #selector(currencyAction(_:)))
+        let percent = textButton("%", "Percentage", #selector(percentAction(_:)))
+        let thousands = textButton("000", "Comma Style", #selector(thousandsAction(_:)))
+        let incDec = textButton("\(dec)0→", "Increase Decimal", #selector(increaseDecimals(_:)))
+        let decDec = textButton("←\(dec)0", "Decrease Decimal", #selector(decreaseDecimals(_:)))
 
-        let sum = NSPopUpButton(frame: .zero, pullsDown: true)
-        sum.bezelStyle = .accessoryBarAction
-        sum.isBordered = false
-        let sumHead = NSMenuItem(); sumHead.image = NSImage(systemSymbolName: "sum", accessibilityDescription: L("AutoSum"))
-        sum.menu?.addItem(sumHead)
-        for (i, f) in ["SUM", "AVERAGE", "COUNT", "MAX", "MIN"].enumerated() {
-            let it = NSMenuItem(title: Workbook.localName(f), action: #selector(autoSumMenu(_:)), keyEquivalent: "")
-            it.tag = i; it.target = self
-            sum.menu?.addItem(it)
+        let sum = MenuButton(image: ToolbarKit.symbol("sum", L("AutoSum")), tip: L("AutoSum")) { [weak self] in
+            let m = NSMenu()
+            for (i, f) in ["SUM", "AVERAGE", "COUNT", "MAX", "MIN"].enumerated() {
+                let it = NSMenuItem(title: Workbook.localName(f), action: #selector(SheetWindowController.autoSumMenu(_:)), keyEquivalent: "")
+                it.tag = i; it.target = self
+                m.addItem(it)
+            }
+            return m
         }
-        sum.toolTip = L("AutoSum")
-        sum.widthAnchor.constraint(equalToConstant: 44).isActive = true
-
-        let sortUp = button("arrow.up.arrow.down", "Sort A to Z", #selector(GridView.sortAscending(_:)))
-        sortUp.target = nil
-        let sortDown = button("arrow.down.arrow.up", "Sort Z to A", #selector(GridView.sortDescending(_:)))
-        sortDown.target = nil
-        let freeze = button("snowflake", "Freeze Panes", #selector(GridView.freezePanes(_:)))
-        freeze.target = nil
-        let filter = button("line.3.horizontal.decrease.circle", "Filter", #selector(GridView.toggleFilter(_:)))
-        filter.target = nil
+        let sortUp = ToolbarKit.button(image: ToolbarKit.textImage("A↓Z", size: 10), tip: L("Sort A to Z"), target: nil,
+                                       action: #selector(GridView.sortAscending(_:)))
+        let sortDown = ToolbarKit.button(image: ToolbarKit.textImage("Z↓A", size: 10), tip: L("Sort Z to A"), target: nil,
+                                         action: #selector(GridView.sortDescending(_:)))
+        let filter = button("line.3.horizontal.decrease.circle", "Filter", #selector(GridView.toggleFilter(_:)), responderChain: true)
+        let freeze = button("snowflake", "Freeze Panes", #selector(GridView.freezePanes(_:)), responderChain: true)
 
         let painter = button("paintbrush.pointed", "Format Painter", #selector(formatPainter(_:)))
-        let undo = button("arrow.uturn.backward", "Undo (⌘Z)", #selector(GridView.undo(_:)))
-        undo.target = nil
-        let redo = button("arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(GridView.redo(_:)))
-        redo.target = nil
+        let undo = button("arrow.uturn.backward", "Undo (⌘Z)", #selector(GridView.undo(_:)), responderChain: true)
+        let redo = button("arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(GridView.redo(_:)), responderChain: true)
 
         let groups: [(NSView, NSStackView.VisibilityPriority)] = [
             (group([undo, redo, painter]), .mustHold),
             (divider(), .mustHold),
             (group([fontSizeBox, boldButton, italicButton, underlineButton, strike]), .mustHold),
-            (divider(), .detachOnlyIfNecessary),
-            (group([textColorIcon, textColorWell, fillIcon, fillColorWell, borders]), NSStackView.VisibilityPriority(800)),
             (divider(), NSStackView.VisibilityPriority(800)),
-            (group(alignButtons + [wrapButton, merge]), NSStackView.VisibilityPriority(900)),
+            (group([textColor, fillColor, borders]), NSStackView.VisibilityPriority(800)),
             (divider(), NSStackView.VisibilityPriority(900)),
-            (group([numberFormatPopup, percent, thousands, incDec, decDec]), NSStackView.VisibilityPriority(700)),
+            (group(alignButtons + [wrapButton, merge]), NSStackView.VisibilityPriority(900)),
             (divider(), NSStackView.VisibilityPriority(700)),
+            (group([numberFormatPopup, currency, percent, thousands, incDec, decDec]), NSStackView.VisibilityPriority(700)),
+            (divider(), NSStackView.VisibilityPriority(600)),
             (group([sum, sortUp, sortDown, filter, freeze]), NSStackView.VisibilityPriority(600)),
         ]
         for (v, p) in groups {
@@ -276,19 +285,29 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         cancelButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("Cancel"))
         cancelButton.title = ""; cancelButton.imagePosition = .imageOnly
         cancelButton.bezelStyle = .accessoryBarAction
+        cancelButton.showsBorderOnlyWhileMouseInside = true
+        cancelButton.contentTintColor = .systemRed
+        cancelButton.toolTip = L("Cancel")
         cancelButton.target = self; cancelButton.action = #selector(cancelEdit)
         enterButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: L("Enter"))
         enterButton.title = ""; enterButton.imagePosition = .imageOnly
         enterButton.bezelStyle = .accessoryBarAction
+        enterButton.showsBorderOnlyWhileMouseInside = true
+        enterButton.contentTintColor = .systemGreen
+        enterButton.toolTip = L("Enter")
         enterButton.target = self; enterButton.action = #selector(confirmEdit)
+        for b in [cancelButton, enterButton] { b.widthAnchor.constraint(equalToConstant: 24).isActive = true }
         let fx = NSButton(title: "fx", target: self, action: #selector(insertFunction(_:)))
         fx.bezelStyle = .accessoryBarAction
+        fx.showsBorderOnlyWhileMouseInside = true
         fx.font = NSFont(descriptor: NSFont.systemFont(ofSize: 13, weight: .medium).fontDescriptor.withSymbolicTraits(.italic), size: 13)
         fx.toolTip = L("Insert Function")
         formulaField.font = .systemFont(ofSize: 13)
         formulaField.cell?.isScrollable = true
         formulaField.cell?.wraps = false
         formulaField.placeholderString = ""
+        formulaField.bezelStyle = .roundedBezel
+        nameBox.bezelStyle = .roundedBezel
         formulaField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         for v in [nameBox, cancelButton, enterButton, fx, formulaField] as [NSView] { bar.addArrangedSubview(v) }
         return bar
@@ -322,6 +341,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         add.title = ""
         add.imagePosition = .imageOnly
         add.bezelStyle = .accessoryBarAction
+        add.showsBorderOnlyWhileMouseInside = true
         add.toolTip = L("New Sheet")
         modeLabel.font = .systemFont(ofSize: 11)
         modeLabel.textColor = .secondaryLabelColor
@@ -338,12 +358,23 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         zoomSlider.widthAnchor.constraint(equalToConstant: 90).isActive = true
         zoomLabel.title = "100%"
         zoomLabel.bezelStyle = .accessoryBarAction
+        zoomLabel.showsBorderOnlyWhileMouseInside = true
+        zoomLabel.toolTip = L("Actual Size")
         zoomLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         zoomLabel.target = self; zoomLabel.action = #selector(zoomReset)
         zoomLabel.widthAnchor.constraint(equalToConstant: 46).isActive = true
 
-        for v in [tabsScroll, add, modeLabel, statusLabel, zoomSlider, zoomLabel] as [NSView] { bar.addArrangedSubview(v) }
-        bar.setCustomSpacing(16, after: add)
+        let zoomOut = ToolbarKit.button(image: ToolbarKit.symbol("minus", L("Zoom Out")), tip: L("Zoom Out"), target: self, action: #selector(zoomStepOut))
+        let zoomIn = ToolbarKit.button(image: ToolbarKit.symbol("plus", L("Zoom In")), tip: L("Zoom In"), target: self, action: #selector(zoomStepIn))
+        for b in [zoomOut, zoomIn] { b.widthAnchor.constraint(equalToConstant: 20).isActive = true }
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        statusLabel.setContentHuggingPriority(.init(200), for: .horizontal)
+        for v in [tabsScroll, add, modeLabel, spacer, statusLabel, zoomOut, zoomSlider, zoomIn, zoomLabel] as [NSView] { bar.addArrangedSubview(v) }
+        bar.setCustomSpacing(14, after: add)
+        bar.setCustomSpacing(14, after: statusLabel)
+        bar.setCustomSpacing(0, after: zoomOut)
+        bar.setCustomSpacing(0, after: zoomSlider)
         return bar
     }
 
@@ -354,11 +385,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         let names = grid.book.sheetNames
         for (i, name) in names.enumerated() where !grid.book.isSheetHidden(i) {
             let b = SheetTab(title: name, target: self, action: #selector(selectSheet(_:)))
-            b.bezelStyle = .accessoryBarAction
-            b.setButtonType(.pushOnPushOff)
+            b.isBordered = false
             b.tag = i
-            b.state = i == grid.sheet ? .on : .off
-            b.font = .systemFont(ofSize: 12, weight: i == grid.sheet ? .semibold : .regular)
+            b.isCurrent = i == grid.sheet
+            b.setAccessibilityLabel(name)
             b.onDoubleClick = { [weak self] in self?.renameSheet(nil) }
             b.contextMenu = { [weak self] in self?.tabMenu() ?? NSMenu() }
             tabsStack.addArrangedSubview(b)
@@ -502,6 +532,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     func gridModeChanged(_ g: GridView) {
         cancelButton.isEnabled = g.isEditing
         enterButton.isEnabled = g.isEditing
+        cancelButton.alphaValue = g.isEditing ? 1 : 0.25
+        enterButton.alphaValue = g.isEditing ? 1 : 0.25
         modeLabel.stringValue = g.isEditing ? (g.isPointing ? L("Point") : (g.editMode == .enter ? L("Enter") : L("Edit"))) : L("Ready")
         if !g.isEditing { formulaField.stringValue = g.book.input(sheet: g.sheet, row: g.active.row, col: g.active.col) }
     }
@@ -629,8 +661,9 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         let s = c.usingColorSpace(.sRGB) ?? c
         return String(format: "#%02X%02X%02X", Int(s.redComponent * 255), Int(s.greenComponent * 255), Int(s.blueComponent * 255))
     }
-    @objc private func textColorChanged(_ sender: NSColorWell) { grid.setStyle("font.color", hex(sender.color)) }
-    @objc private func fillColorChanged(_ sender: NSColorWell) { grid.setStyle("fill.fg_color", hex(sender.color)) }
+    @objc private func currencyAction(_ sender: Any?) {
+        if let f = NumberFormats.all.first(where: { $0.title == L("Currency") }) { grid.setStyle("num_fmt", f.code) }
+    }
 
     @objc func applyNumberFormat(_ sender: NSMenuItem) {
         guard let f = NumberFormats.all[safe: sender.tag] else { return }
@@ -696,6 +729,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         zoomLabel.title = "\(Int((grid.zoom * 100).rounded()))%"
     }
     @objc private func zoomReset() { grid.zoom = 1; syncZoom() }
+    @objc private func zoomStepIn() { grid.zoomIn(nil); syncZoom() }
+    @objc private func zoomStepOut() { grid.zoomOut(nil); syncZoom() }
     func syncZoom() {
         zoomSlider.doubleValue = Double(grid.zoom * 100)
         zoomLabel.title = "\(Int((grid.zoom * 100).rounded()))%"
