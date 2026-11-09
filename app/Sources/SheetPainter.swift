@@ -136,16 +136,20 @@ final class SheetPainter {
             }
         }
 
-        // 5. borders
+        // 5. borders (per side: weight and colour)
         for c in data.cells where c.borderMask != 0 && rows.contains(c.row) && cols.contains(c.col) {
             let r = rect(c.row, c.col)
-            let w: CGFloat = [1, 1, 2, 3, 3][Int(min(c.borderWeight, 4))]
-            (c.borderColor == VCell.noColor ? textColor : SheetPainter.rgb(c.borderColor)).setFill()
-            let m = c.borderMask
-            if m & 1 != 0 { CGRect(x: r.minX - hair, y: r.minY - hair, width: r.width + hair, height: w).fill() }
-            if m & 4 != 0 { CGRect(x: r.minX - hair, y: r.maxY - w + (w > 1 ? hair : 0) - hair, width: r.width + hair, height: w).fill() }
-            if m & 8 != 0 { CGRect(x: r.minX - hair, y: r.minY - hair, width: w, height: r.height + hair).fill() }
-            if m & 2 != 0 { CGRect(x: r.maxX - w + (w > 1 ? hair : 0) - hair, y: r.minY - hair, width: w, height: r.height + hair).fill() }
+            for side in 0..<4 where c.borderMask & (1 << side) != 0 {
+                let w: CGFloat = [hair * 2, max(hair * 2, 1), 2, 3][c.borderWeight(side: side)]
+                let bc = c.borderColor(side: side)
+                (bc == VCell.noColor ? textColor : SheetPainter.rgb(bc)).setFill()
+                switch side {
+                case 0: CGRect(x: r.minX - hair, y: r.minY - hair, width: r.width + hair, height: w).fill()
+                case 1: CGRect(x: r.maxX - hair - (w - hair) / 2, y: r.minY - hair, width: w, height: r.height + hair).fill()
+                case 2: CGRect(x: r.minX - hair, y: r.maxY - hair - (w - hair) / 2, width: r.width + hair, height: w).fill()
+                default: CGRect(x: r.minX - hair - (w - hair) / 2, y: r.minY - hair, width: w, height: r.height + hair).fill()
+                }
+            }
         }
     }
 

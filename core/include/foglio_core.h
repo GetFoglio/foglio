@@ -25,9 +25,9 @@ typedef struct {
     uint8_t underline, strike, wrap;
     uint8_t valign;                // 0 bottom, 1 center, 2 top
     uint8_t border_mask;           // bit0 top, bit1 right, bit2 bottom, bit3 left
-    uint8_t border_weight;         // 1 thin, 2 medium, 3 thick, 4 double
+    uint8_t border_weight;         // 2 bits per side (top, right, bottom, left from low bits): 1 thin, 2 medium, 3 thick
     uint8_t _pad;
-    uint32_t border_color;         // 0xRRGGBB or FOGLIO_NO_COLOR (= automatic)
+    uint32_t border_colors[4];     // top, right, bottom, left: 0xRRGGBB or FOGLIO_NO_COLOR (= automatic)
 } FoglioCell;
 
 typedef struct {

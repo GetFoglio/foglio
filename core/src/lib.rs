@@ -64,10 +64,11 @@ pub struct FoglioCell {
     pub(crate) valign: u8,
     /// bit0 top, bit1 right, bit2 bottom, bit3 left
     pub(crate) border_mask: u8,
-    /// 1 thin, 2 medium, 3 thick, 4 double (max of the sides)
+    /// 2 bits per side (top, right, bottom, left from the low bits): 1 thin, 2 medium, 3 thick/double
     pub(crate) border_weight: u8,
     pub(crate) _pad: u8,
-    pub(crate) border_color: u32,
+    /// top, right, bottom, left — 0xRRGGBB or NO_COLOR (automatic)
+    pub(crate) border_colors: [u32; 4],
 }
 
 #[repr(C)]
@@ -99,7 +100,7 @@ pub(crate) struct StyleInfo {
     pub(crate) valign: u8,
     pub(crate) border_mask: u8,
     pub(crate) border_weight: u8,
-    pub(crate) border_color: u32,
+    pub(crate) border_colors: [u32; 4],
 }
 
 pub struct FoglioBook {

@@ -560,7 +560,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     }
 
     func select(range r: GridRange, active a: CellRef? = nil) {
-        selection = r
+        selection = expandForMerges(r, geo)
         active = a ?? CellRef(row: r.r0, col: r.c0)
         cursor = CellRef(row: r.r1, col: r.c1)
         ensureVisible(active)

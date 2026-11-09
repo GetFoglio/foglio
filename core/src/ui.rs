@@ -40,20 +40,17 @@ pub(crate) fn style_to_info(st: &Style, theme: &Theme) -> StyleInfo {
         ),
         None => (0, 0, 0),
     };
-    let (mut mask, mut weight, mut bcolor) = (0u8, 0u8, NO_COLOR);
-    for (bit, item) in [(1u8, &st.border.top), (2, &st.border.right), (4, &st.border.bottom), (8, &st.border.left)] {
+    let (mut mask, mut weight, mut colors) = (0u8, 0u8, [NO_COLOR; 4]);
+    for (i, item) in [&st.border.top, &st.border.right, &st.border.bottom, &st.border.left].into_iter().enumerate() {
         if let Some(b) = item {
-            mask |= bit;
-            let w = match b.style {
+            mask |= 1 << i;
+            let w: u8 = match b.style {
                 BorderStyle::Medium | BorderStyle::MediumDashed | BorderStyle::MediumDashDot | BorderStyle::MediumDashDotDot => 2,
-                BorderStyle::Thick => 3,
-                BorderStyle::Double => 4,
+                BorderStyle::Thick | BorderStyle::Double => 3,
                 _ => 1,
             };
-            weight = weight.max(w);
-            if bcolor == NO_COLOR {
-                bcolor = color(&b.color);
-            }
+            weight |= w << (2 * i);
+            colors[i] = color(&b.color);
         }
     }
     let fg = color(&st.font.color);
@@ -71,7 +68,7 @@ pub(crate) fn style_to_info(st: &Style, theme: &Theme) -> StyleInfo {
         valign,
         border_mask: mask,
         border_weight: weight,
-        border_color: bcolor,
+        border_colors: colors,
     }
 }
 
@@ -116,7 +113,7 @@ pub extern "C" fn foglio_viewport(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i
                 align: st.align, bold: st.bold, italic: st.italic, fg: st.fg, bg: st.bg,
                 font_size: st.font_size, underline: st.underline, strike: st.strike, wrap: st.wrap,
                 valign: st.valign, border_mask: st.border_mask, border_weight: st.border_weight, _pad: 0,
-                border_color: st.border_color,
+                border_colors: st.border_colors,
             });
         }
         let mut owned = Box::new(ViewportOwned {
