@@ -7,6 +7,7 @@ protocol GridViewDelegate: AnyObject {
     func gridContentChanged(_ grid: GridView)
     func gridModeChanged(_ grid: GridView)
     func gridRequestsSheet(_ grid: GridView, offset: Int)
+    func gridZoomChanged(_ grid: GridView)
 }
 
 /// Text field used for in-cell editing.
@@ -50,6 +51,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             updateScrollers()
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
+            // Pinch, ⌘-scroll and View ▸ Zoom change it here: keep the status bar's slider and percentage in step.
+            if zoom != oldValue { delegate?.gridZoomChanged(self) }
         }
     }
 
@@ -203,6 +206,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         painter.fontNameForId = { [weak book] id in book?.fontName(id: id) }
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        // Until the next draw (during a live resize) keep the old cells where they are instead of stretching them.
+        layerContentsPlacement = .topLeft
         for s in [vScroller, hScroller] {
             s.scrollerStyle = .legacy
             s.isEnabled = true
@@ -242,6 +247,23 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil { chartLayer.reload() }
+    }
+
+    /// The grid draws only what fits in its bounds, and its layer redraws only on `needsDisplay` (`.onSetNeedsDisplay`):
+    /// a new size (window resize, also live) must redraw the cells, headers and frozen panes and lay out the scrollers
+    /// and the chart/picture panes, otherwise the newly exposed area stays blank until the next scroll.
+    override func setFrameSize(_ newSize: NSSize) {
+        let old = frame.size
+        super.setFrameSize(newSize)
+        guard newSize != old else { return }
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        needsLayout = true
+        needsDisplay = true
     }
 
     override func layout() {
@@ -440,8 +462,21 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         ctx.restoreGState()
 
         chartLayer.gridDidDraw()   // Foglio charts: follow the row header width
+        lastDrawn = (rowsScrolled, colsScrolled, bounds.size)
         Perf.shared.frameDrawn(ms: (CACurrentMediaTime() - t0) * 1000)
     }
+
+    /// What the last draw covered (scrolled rows/columns, view size): automated tests check it after a resize.
+    private(set) var lastDrawn: (rows: ClosedRange<Int>, cols: ClosedRange<Int>, size: CGSize)?
+    /// Rows/columns of the scrolled part the last draw labelled in the headers.
+    private(set) var lastDrawnHeaders: (rows: ClosedRange<Int>?, cols: ClosedRange<Int>?)
+    /// True when the scroll bars sit on the view's right and bottom edges (laid out for the current size).
+    var scrollersFitForTesting: Bool {
+        abs(vScroller.frame.maxX - bounds.width) < 0.5 && abs(vScroller.frame.height - (bounds.height - scrollerW)) < 0.5
+            && abs(hScroller.frame.maxY - bounds.height) < 0.5 && abs(hScroller.frame.width - (bounds.width - scrollerW)) < 0.5
+    }
+    /// Scrolled rows/columns that fit in the view now.
+    var visibleRangeForTesting: (rows: ClosedRange<Int>, cols: ClosedRange<Int>) { let g = geo; return (scrolledRows(g), scrolledCols(g)) }
 
     private func clipped(_ r: CGRect, _ area: CGRect) -> CGRect { r.intersection(area.insetBy(dx: -4, dy: -4)) }
 
@@ -595,6 +630,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             }
             NSGraphicsContext.restoreGraphicsState()
         }
+        lastDrawnHeaders = (rowParts.last?.0, colParts.last?.0)
         for (rr, y0, y1) in rowParts {
             NSGraphicsContext.saveGraphicsState()
             NSBezierPath(rect: CGRect(x: 0, y: y0, width: headerW, height: max(0, y1 - y0))).setClip()

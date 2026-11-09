@@ -384,6 +384,15 @@ pub(super) fn load_sheet_drawings<R: Read + Seek>(
                 }
                 continue;
             }
+            if child(anchor, "grpSp").is_some() {
+                // Foglio fork: the pictures of a group shape, one picture each (the group itself is not kept).
+                let pictures = super::pictures::parse_group_pictures(archive, ws, anchor, &drawing_rels, &mut z);
+                if !pictures.is_empty() {
+                    z -= 1; // the next anchor follows the group's last picture
+                }
+                ws.pictures.extend(pictures);
+                continue;
+            }
             let Some(chart_anchor) = anchor_of(ws, anchor) else { continue };
             let Some(frame) = child(anchor, "graphicFrame") else { continue };
             let name = path_child(frame, &["nvGraphicFramePr", "cNvPr"])

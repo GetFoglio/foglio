@@ -10,7 +10,7 @@ use std::ptr;
 
 use ironcalc::base::charts::{advance_anchor, ChartAnchor};
 use ironcalc::base::pictures::{
-    anchor_extent, drawing_order, fit_in_cell, image_format, image_pixel_size, picture_extent, DrawingObject, Picture,
+    anchor_extent, drawing_order, export_anchor, fit_in_cell, image_format, image_pixel_size, picture_extent, DrawingObject, Picture,
     PictureCrop, PictureEditAs, Restack,
 };
 use ironcalc::base::types::Worksheet;
@@ -50,7 +50,9 @@ fn picture_json(ws: &Worksheet, index: usize, p: &Picture) -> Value {
         "px_w": pw,
         "px_h": ph,
         "from": point_json(ws, &p.anchor.from),
-        "to": point_json(ws, &p.anchor.to),
+        // Where the picture ends with the current row heights and column widths (one-cell and absolute pictures
+        // keep their size: their stored `to` can be stale).
+        "to": point_json(ws, &export_anchor(ws, p).to),
         "cx": cx,
         "cy": cy,
         "edit_as": edit_as_name(p.edit_as),

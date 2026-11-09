@@ -431,6 +431,122 @@ fn broken_drawing_parts_are_skipped() {
     assert_eq!(back.pictures(0).len(), 1);
 }
 
+/// Excel files group product photos (`xdr:grpSp`, nested groups, scaled child coordinates): every picture of a
+/// group is read, placed where the group puts it. A picture that merely sits inside one cell (a logo in a header
+/// cell) stays a floating picture where the file puts it; only Foglio's own fitted in-cell anchors read back as
+/// in-cell (see `place_in_cell`).
+#[test]
+fn grouped_pictures_and_single_cell_pictures() {
+    let b = Book::new();
+    b.add(0, &png(100, 50, 1), r#"{"from":{"row":1,"col":1,"fy":0,"fx":0}}"#);
+    b.add(0, &png(40, 40, 2), r#"{"from":{"row":5,"col":1,"fy":0,"fx":0}}"#);
+    let src = tmp("group-src.xlsx");
+    b.save(&src);
+    let drawing = part(&src, "xl/drawings/drawing1.xml");
+    let ids: Vec<String> = drawing.split(r#"r:embed=""#).skip(1).map(|t| t[..t.find('"').unwrap()].to_string()).collect();
+    assert_eq!(ids.len(), 2);
+    let head = &drawing[..drawing.find("<xdr:twoCellAnchor").unwrap()];
+    // B2..D6 on a default sheet: 2 columns of 64 px, 4 rows of 15 pt.
+    let (w, h) = (2 * 64 * EMU_PX, 4 * 190_500);
+    let pic = |id: usize, rid: &str, x: i64, y: i64, cx: i64, cy: i64| {
+        format!(
+            r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="{id}" name="Photo {id}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#
+        )
+    };
+    let point = |tag: &str, col: i64, col_off: i64, row: i64, row_off: i64| {
+        format!("<xdr:{tag}><xdr:col>{col}</xdr:col><xdr:colOff>{col_off}</xdr:colOff><xdr:row>{row}</xdr:row><xdr:rowOff>{row_off}</xdr:rowOff></xdr:{tag}>")
+    };
+    // The group's children use coordinates at half scale, offset by 1000; the second photo is in a nested group.
+    let group = format!(
+        r#"<xdr:twoCellAnchor>{}{}<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id="10" name="Group 1"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm><a:off x="777" y="888"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="1000" y="1000"/><a:chExt cx="{}" cy="{}"/></a:xfrm></xdr:grpSpPr><xdr:sp><xdr:nvSpPr><xdr:cNvPr id="11" name="Label"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/></xdr:sp>{}<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id="12" name="Group 2"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/><a:chOff x="0" y="0"/><a:chExt cx="{}" cy="{}"/></a:xfrm></xdr:grpSpPr>{}</xdr:grpSp></xdr:grpSp><xdr:clientData/></xdr:twoCellAnchor>"#,
+        point("from", 1, 0, 1, 0),
+        point("to", 3, 0, 5, 0),
+        w / 2,
+        h / 2,
+        pic(13, &ids[0], 1000, 1000, w / 4, h / 4),
+        1000 + w / 4,
+        1000 + h / 4,
+        w / 4,
+        h / 4,
+        w / 4,
+        h / 4,
+        pic(14, &ids[1], 0, 0, w / 4, h / 4),
+    );
+    // A group squeezed to zero height (Excel shows nothing) and a logo inside cell B8, not centred.
+    let empty = format!(
+        r#"<xdr:twoCellAnchor>{}{}<xdr:grpSp><xdr:nvGrpSpPr><xdr:cNvPr id="20" name="Group 3"/><xdr:cNvGrpSpPr/></xdr:nvGrpSpPr><xdr:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w}" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></xdr:grpSpPr>{}</xdr:grpSp><xdr:clientData/></xdr:twoCellAnchor>"#,
+        point("from", 1, 0, 9, 0),
+        point("to", 3, 0, 9, 0),
+        pic(21, &ids[0], 0, 0, w, h),
+    );
+    let logo = format!(
+        r#"<xdr:twoCellAnchor>{}{}{}<xdr:clientData/></xdr:twoCellAnchor>"#,
+        point("from", 1, 5 * EMU_PX, 7, 2 * EMU_PX),
+        point("to", 1, 40 * EMU_PX, 7, 15 * EMU_PX),
+        pic(30, &ids[0], 0, 0, 35 * EMU_PX, 13 * EMU_PX),
+    );
+    let new_drawing = format!("{head}{group}{empty}{logo}</xdr:wsDr>");
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, data) in zip_entries(&src) {
+        let data = if name == "xl/drawings/drawing1.xml" { new_drawing.clone().into_bytes() } else { data };
+        out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    let path = tmp("group.xlsx");
+    std::fs::write(&path, out.finish().unwrap().into_inner()).unwrap();
+
+    let back = Book::open(&path);
+    let pics = back.pictures(0);
+    assert_eq!(pics.len(), 3, "{pics:?}");
+    let at = |p: &Value| (p["from"]["row"].as_i64().unwrap(), p["from"]["col"].as_i64().unwrap(), p["from"]["fy"].as_f64().unwrap(), p["from"]["fx"].as_f64().unwrap());
+    // First photo: top-left quarter of the group's area, at B2.
+    assert_eq!(at(&pics[0]), (2, 2, 0.0, 0.0));
+    assert_eq!((pics[0]["cx"].as_i64(), pics[0]["cy"].as_i64()), (Some(w / 2), Some(h / 2)));
+    assert_eq!(pics[0]["edit_as"], "two_cell");
+    assert_eq!(pics[0]["name"], "Photo 13");
+    // Second photo (nested group): bottom-right quarter, from C4.
+    assert_eq!(at(&pics[1]), (4, 3, 0.0, 0.0));
+    assert_eq!((pics[1]["cx"].as_i64(), pics[1]["cy"].as_i64()), (Some(w / 2), Some(h / 2)));
+    assert_eq!(pics[1]["image"], b.pictures(0)[1]["image"]);
+    // The logo stays floating, where the file puts it.
+    assert_eq!(pics[2]["in_cell"], false);
+    assert_eq!((pics[2]["from"]["row"].as_i64(), pics[2]["from"]["col"].as_i64()), (Some(8), Some(2)));
+    assert_eq!((pics[2]["cx"].as_i64(), pics[2]["cy"].as_i64()), (Some(35 * EMU_PX), Some(13 * EMU_PX)));
+    // Stacking follows the drawing: group pictures, then the logo.
+    assert_eq!(back.order(0), "p0,p1,p2");
+    // Saved and reopened: the same pictures (each now its own anchor).
+    let again = tmp("group-resaved.xlsx");
+    back.save(&again);
+    let reopened = Book::open(&again);
+    let after = reopened.pictures(0);
+    assert_eq!(after.len(), 3);
+    for (x, y) in pics.iter().zip(&after) {
+        assert_eq!(at(x), at(y));
+        assert_eq!((&x["cx"], &x["cy"], &x["in_cell"]), (&y["cx"], &y["cy"], &y["in_cell"]));
+    }
+}
+
+/// A price list laid out like real ones (tests/fixtures/make_price_list_fixture.py): the product photos of a
+/// tall row are a group shape (scaled child coordinates, a nested group), the logo sits inside one header cell.
+#[test]
+fn price_list_fixture() {
+    let b = Book::open(&fixture("price_list_layout.xlsx"));
+    let pics = b.pictures(0);
+    assert_eq!(pics.len(), 3, "{pics:?}");
+    let corner = |p: &Value| (p["from"]["row"].as_i64().unwrap(), p["from"]["col"].as_i64().unwrap());
+    // Row 5 is 180 pt (240 px), column D 58.33 characters (408 px); the group starts 10 px right, 20 px down.
+    assert_eq!(corner(&pics[0]), (5, 4));
+    assert!((pics[0]["from"]["fx"].as_f64().unwrap() - 10.0 / 408.0).abs() < 1e-6);
+    assert!((pics[0]["from"]["fy"].as_f64().unwrap() - 20.0 / 240.0).abs() < 1e-6);
+    assert_eq!((pics[0]["cx"].as_i64(), pics[0]["cy"].as_i64()), (Some(160 * EMU_PX), Some(120 * EMU_PX)));
+    assert_eq!(corner(&pics[1]), (5, 4));
+    assert!((pics[1]["from"]["fx"].as_f64().unwrap() - 200.0 / 408.0).abs() < 1e-6);
+    assert_eq!((pics[1]["cx"].as_i64(), pics[1]["cy"].as_i64()), (Some(90 * EMU_PX), Some(150 * EMU_PX)));
+    assert_eq!(corner(&pics[2]), (1, 2));
+    assert_eq!(pics[2]["in_cell"], false);
+    assert!(pics.iter().all(|p| p["edit_as"] == "two_cell"));
+}
+
 /// Real files with pictures (Apache POI test data, when present: FOGLIO_CORPUS or the default path):
 /// every picture survives a save and reopen with its image, crop and placement.
 #[test]

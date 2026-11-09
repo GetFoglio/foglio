@@ -160,6 +160,21 @@ fn test_currency_valid_formats() {
     assert_eq!(format_number(42.0, "[$€]0", locale).text, "€42");
 }
 
+/// Foglio fork: the symbol of `[$€-407]` stays where the format puts it, symbols can be longer than one
+/// character, and a locale-only tag (`[$-410]`, common in front of Italian dates) shows nothing.
+#[test]
+fn test_currency_position_and_locale_tags() {
+    let locale = get_default_locale();
+    assert_eq!(format_number(13.75, "#,##0.00 [$€-407]", locale).text, "13.75 €");
+    assert_eq!(format_number(13.75, "[$€-407] #,##0.00", locale).text, "€ 13.75");
+    assert_eq!(format_number(5.0, "#,##0.00\\ [$CHF-807]", locale).text, "5.00 CHF");
+    assert_eq!(format_number(41181.0, "[$-410]dd/mm/yyyy", locale).text, "29/09/2012");
+    assert_eq!(format_number(42.0, "[$-410]0", locale).text, "42");
+    // Excel's accounting format for euro prices (German locale tag), as in many price lists.
+    let accounting = "_-* #,##0.00\\ [$€-407]_-;\\-* #,##0.00\\ [$€-407]_-;_-* \\-??\\ [$€-407]_-;_-@_-";
+    assert_eq!(format_number(1234.5, accounting, locale).text.trim(), "1,234.50 €");
+}
+
 #[test]
 fn test_failed_to_parse_currency() {
     let locale = get_default_locale();

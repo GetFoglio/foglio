@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::io::{BufReader, Read, Seek};
 
-use ironcalc_base::charts::{advance_anchor, AnchorPoint, ChartAnchor};
+use ironcalc_base::charts::{advance_anchor, AnchorPoint, ChartAnchor, EMU_PER_PIXEL};
 use ironcalc_base::pictures::{
     anchor_extent, fit_in_cell, image_format, image_pixel_size, store_image, Picture, PictureCrop, PictureEditAs,
 };
@@ -117,12 +117,10 @@ pub(super) fn parse_picture<R: Read + Seek>(
             (w as i64 * 9525, h as i64 * 9525)
         }
     };
-    let c_nv_pr = path_child(pic, &["nvPicPr", "cNvPr"]);
-    let name = c_nv_pr.and_then(|n| n.attribute("name")).unwrap_or("").to_string();
-    let descr = c_nv_pr.and_then(|n| n.attribute("descr")).unwrap_or("").to_string();
+    let (name, descr) = names_of(pic);
     let a = anchor_rect;
-    // A two-cell picture inside a single cell is a picture placed in that cell.
-    let in_cell = edit_as == PictureEditAs::TwoCell && a.from.row == a.to.row && a.from.column == a.to.column;
+    // Foglio writes "Place in Cell" pictures as two-cell anchors fitted in their cell: read those back as in-cell.
+    let in_cell = edit_as == PictureEditAs::TwoCell && is_fitted_in_cell(ws, &a);
     let image = store_image(&mut ws.images, &bytes);
     Some(Picture {
         name,
@@ -136,6 +134,205 @@ pub(super) fn parse_picture<R: Read + Seek>(
         in_cell,
         z,
     })
+}
+
+/// `cNvPr/@name` and `@descr` of an `xdr:pic`.
+fn names_of(pic: &XmlNode) -> (String, String) {
+    let c_nv_pr = path_child(pic, &["nvPicPr", "cNvPr"]);
+    let name = c_nv_pr.and_then(|n| n.attribute("name")).unwrap_or("").to_string();
+    let descr = c_nv_pr.and_then(|n| n.attribute("descr")).unwrap_or("").to_string();
+    (name, descr)
+}
+
+/// True for a two-cell anchor exactly as Foglio writes an in-cell picture: inside one cell, centred, fitted to it
+/// with the aspect ratio kept ([`fit_in_cell`], 1 px tolerance). Any other picture that happens to sit inside one
+/// cell (a logo in a header cell, a product photo in a tall row) stays a floating picture where the file puts it.
+fn is_fitted_in_cell(ws: &Worksheet, a: &ChartAnchor) -> bool {
+    if a.from.row != a.to.row || a.from.column != a.to.column {
+        return false;
+    }
+    let (cx, cy) = anchor_extent(ws, a);
+    if cx <= 0 || cy <= 0 {
+        return false;
+    }
+    let f = fit_in_cell(ws, a.from.row, a.from.column, cx, cy);
+    let near = |x: i64, y: i64| (x - y).abs() <= EMU_PER_PIXEL;
+    near(f.from.column_offset, a.from.column_offset)
+        && near(f.from.row_offset, a.from.row_offset)
+        && near(f.to.column_offset, a.to.column_offset)
+        && near(f.to.row_offset, a.to.row_offset)
+}
+
+/// `a:off` (x, y) of an `a:xfrm`, `a:chOff` with `name = "chOff"`.
+fn point_of(xfrm: &XmlNode, name: &str) -> Option<(f64, f64)> {
+    let n = child(xfrm, name)?;
+    Some((n.attribute("x")?.trim().parse().ok()?, n.attribute("y")?.trim().parse().ok()?))
+}
+
+/// `a:ext` / `a:chExt` (cx, cy) of an `a:xfrm`, zero sizes allowed.
+fn size_of(xfrm: &XmlNode, name: &str) -> Option<(f64, f64)> {
+    let n = child(xfrm, name)?;
+    Some((n.attribute("cx")?.trim().parse().ok()?, n.attribute("cy")?.trim().parse().ok()?))
+}
+
+/// Maps coordinates of a group's child space to EMU from the top-left corner of the anchor: `p * scale + offset`.
+#[derive(Clone, Copy)]
+struct GroupTransform {
+    scale: (f64, f64),
+    offset: (f64, f64),
+}
+
+impl GroupTransform {
+    /// The transform of the children of `group` (an `xdr:grpSp`) given the one of its own coordinates
+    /// (`a:xfrm` off/ext place the group in its parent; `chOff`/`chExt` are the coordinates its children use).
+    fn children_of(self, group: &XmlNode) -> Option<GroupTransform> {
+        let xfrm = path_child(group, &["grpSpPr", "xfrm"])?;
+        let off = point_of(xfrm, "off").unwrap_or((0.0, 0.0));
+        let ext = size_of(xfrm, "ext")?;
+        let ch_off = point_of(xfrm, "chOff").unwrap_or(off);
+        let ch_ext = size_of(xfrm, "chExt").unwrap_or(ext);
+        if ch_ext.0 <= 0.0 || ch_ext.1 <= 0.0 {
+            return None;
+        }
+        let k = (ext.0 / ch_ext.0, ext.1 / ch_ext.1);
+        Some(GroupTransform {
+            scale: (self.scale.0 * k.0, self.scale.1 * k.1),
+            offset: (
+                self.offset.0 + self.scale.0 * (off.0 - ch_off.0 * k.0),
+                self.offset.1 + self.scale.1 * (off.1 - ch_off.1 * k.1),
+            ),
+        })
+    }
+}
+
+/// The pictures of a drawing anchor holding a group shape (`xdr:grpSp`, groups nested at any depth): each becomes
+/// a picture of its own, placed where the group puts it inside the anchor and following the cells like the
+/// anchor (`editAs`). Other members of the group (shapes, connectors, text boxes) are skipped, like elsewhere.
+/// `z` is the stacking position of the first picture; it advances by one per picture.
+pub(super) fn parse_group_pictures<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    ws: &mut Worksheet,
+    anchor: &XmlNode,
+    drawing_rels: &HashMap<String, (String, String)>,
+    z: &mut i32,
+) -> Vec<Picture> {
+    let mut out = vec![];
+    let Some(group) = child(anchor, "grpSp") else { return out };
+    let Some(group_xfrm) = path_child(group, &["grpSpPr", "xfrm"]) else { return out };
+    let group_off = point_of(group_xfrm, "off").unwrap_or((0.0, 0.0));
+    let group_ext = size_of(group_xfrm, "ext").unwrap_or((0.0, 0.0));
+    // Where the anchor puts the group on the sheet, and its size there (EMU).
+    let (from, edit_as, (aw, ah)) = match anchor.tag_name() {
+        "twoCellAnchor" => {
+            let Some(from) = child(anchor, "from").and_then(super::charts::anchor_point) else { return out };
+            let Some(to) = child(anchor, "to").and_then(super::charts::anchor_point) else { return out };
+            let edit_as = match anchor.attribute("editAs") {
+                Some("oneCell") => PictureEditAs::OneCell,
+                Some("absolute") => PictureEditAs::Absolute,
+                _ => PictureEditAs::TwoCell,
+            };
+            (from, edit_as, anchor_extent(ws, &ChartAnchor { from, to }))
+        }
+        "oneCellAnchor" => {
+            let Some(from) = child(anchor, "from").and_then(super::charts::anchor_point) else { return out };
+            let Some(size) = ext_of(anchor) else { return out };
+            (from, PictureEditAs::OneCell, size)
+        }
+        "absoluteAnchor" => {
+            let Some(pos) = child(anchor, "pos") else { return out };
+            let (Some(x), Some(y)) = (
+                pos.attribute("x").and_then(|v| v.trim().parse::<i64>().ok()),
+                pos.attribute("y").and_then(|v| v.trim().parse::<i64>().ok()),
+            ) else {
+                return out;
+            };
+            let Some(size) = ext_of(anchor) else { return out };
+            let origin = AnchorPoint { row: 1, column: 1, row_offset: 0, column_offset: 0 };
+            (advance_anchor(ws, origin, x.max(0), y.max(0)), PictureEditAs::Absolute, size)
+        }
+        _ => return out,
+    };
+    // A group squeezed to nothing (Excel files have such leftovers) shows nothing.
+    if aw <= 0 || ah <= 0 || group_ext.0 <= 0.0 || group_ext.1 <= 0.0 {
+        return out;
+    }
+    // The group's own coordinates (its a:off/a:ext) span the anchor.
+    let sx = aw as f64 / group_ext.0;
+    let sy = ah as f64 / group_ext.1;
+    let outer = GroupTransform { scale: (sx, sy), offset: (-group_off.0 * sx, -group_off.1 * sy) };
+    let Some(t) = outer.children_of(group) else { return out };
+    collect_group(archive, ws, group, t, from, edit_as, drawing_rels, z, &mut out, 0);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_group<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    ws: &mut Worksheet,
+    group: &XmlNode,
+    t: GroupTransform,
+    from: AnchorPoint,
+    edit_as: PictureEditAs,
+    drawing_rels: &HashMap<String, (String, String)>,
+    z: &mut i32,
+    out: &mut Vec<Picture>,
+    depth: usize,
+) {
+    if depth > 32 {
+        return;
+    }
+    for node in group.children() {
+        if node.has_tag_name("grpSp") {
+            if let Some(inner) = t.children_of(node) {
+                collect_group(archive, ws, node, inner, from, edit_as, drawing_rels, z, out, depth + 1);
+            }
+            continue;
+        }
+        if !node.has_tag_name("pic") {
+            continue;
+        }
+        let Some(p) = group_picture(archive, ws, node, t, from, edit_as, drawing_rels, *z) else { continue };
+        out.push(p);
+        *z += 1;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn group_picture<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    ws: &mut Worksheet,
+    pic: &XmlNode,
+    t: GroupTransform,
+    from: AnchorPoint,
+    edit_as: PictureEditAs,
+    drawing_rels: &HashMap<String, (String, String)>,
+    z: i32,
+) -> Option<Picture> {
+    let blip_fill = child(pic, "blipFill")?;
+    let rid = child(blip_fill, "blip")?.attribute_ns(REL_NS, "embed")?;
+    let (kind, media_path) = drawing_rels.get(rid)?;
+    if !kind.ends_with("/image") {
+        return None;
+    }
+    let xfrm = path_child(pic, &["spPr", "xfrm"])?;
+    let off = point_of(xfrm, "off")?;
+    let ext = size_of(xfrm, "ext")?;
+    // EMU from the anchor's top-left corner.
+    let x0 = (off.0 * t.scale.0 + t.offset.0).round().max(0.0) as i64;
+    let y0 = (off.1 * t.scale.1 + t.offset.1).round().max(0.0) as i64;
+    let cx = (ext.0 * t.scale.0).round() as i64;
+    let cy = (ext.1 * t.scale.1).round() as i64;
+    if cx <= 0 || cy <= 0 {
+        return None;
+    }
+    let bytes = read_bytes(archive, media_path)?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let anchor = ChartAnchor { from: advance_anchor(ws, from, x0, y0), to: advance_anchor(ws, from, x0 + cx, y0 + cy) };
+    let (name, descr) = names_of(pic);
+    let image = store_image(&mut ws.images, &bytes);
+    Some(Picture { name, descr, image, anchor, cx, cy, edit_as, crop: crop_of(blip_fill), in_cell: false, z })
 }
 
 // ---------------------------------------------------------------------------

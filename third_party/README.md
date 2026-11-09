@@ -154,6 +154,17 @@ resolving to these copies. Every Foglio change is marked with a
   text other than "TRUE"/"FALSE" given directly is `#VALUE!`; the empty
   string is still ignored (upstream's tests require it); text in referenced
   cells is still ignored.
+* **Currency tags in number formats** (`formatter/lexer.rs`, `parser.rs`):
+  the symbol of `[$€-407]` is written where the format puts it
+  (`#,##0.00 [$€-407]` is `1.234,50 €`; upstream always put it in front of the
+  number), symbols can be longer than one character (`[$CHF-807]`), and a
+  locale-only tag such as `[$-410]` (Italian dates) shows nothing instead of
+  making the format invalid. `Token::Currency` holds a `String`; the two
+  upstream lexer tests in `test/test_special_dollar.rs` compare with one.
+* **Frozen panes and grid lines of the sheet view** (`import/worksheets.rs::get_sheet_view`):
+  a pane in state `frozenSplit` (panes frozen after a split, as Excel writes
+  them) is read as frozen like `frozen` (upstream: not frozen); `showGridLines`
+  accepts `true`/`false` as well as `1`/`0` (upstream: `"true"` hid them).
 * Not changed: `POWER(-8,1/3)` stays -2 — Excel computes odd roots of negative
   numbers (Excel cached -1.9999999999999998 in
   `ironcalc/tests/calc_tests/MATH_AND_TRIGONOMETRY/POWER.xlsx`).
@@ -260,8 +271,12 @@ resolving to these copies. Every Foglio change is marked with a
   → drawing rels → `xl/media/*` (case-insensitive part names, 64 MB cap),
   twoCell/oneCell/absolute anchors, `a:srcRect`, `cNvPr/@descr`; anchors
   inside `mc:AlternateContent` (first choice with an anchor, else the
-  fallback); a two-cell picture inside a single cell becomes an in-cell
-  picture. Excel 365 pictures in cells: `xl/metadata.xml` (XLRICHVALUE value
+  fallback); pictures inside group shapes (`xdr:grpSp`, nested, with scaled
+  child coordinates `chOff`/`chExt`) become pictures of their own, placed where
+  the group puts them in its anchor (groups squeezed to zero size are skipped);
+  a two-cell anchor fitted in a single cell the way Foglio writes in-cell
+  pictures (centred, aspect kept, 1 px tolerance) becomes an in-cell picture,
+  any other picture inside one cell stays floating. Excel 365 pictures in cells: `xl/metadata.xml` (XLRICHVALUE value
   metadata) → `xl/richData/rdrichvalue.xml` + `rdrichvaluestructure.xml`
   (`_localImage`, `_rvRel:LocalImageIdentifier`, `Text` as alt text) →
   `richValueRel.xml` + rels → media; cells with a matching `vm` (found by a

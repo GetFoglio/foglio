@@ -4,9 +4,9 @@
 ROOT=${0:A:h:h}
 APP=$ROOT/build/Foglio.app/Contents/MacOS/Foglio
 fail=0
-run() { # name, expected-lines-regex..., script
+run() { # name, script, expected-lines...  (FILE=path opens that workbook instead of a blank one)
   local name=$1 script=$2; shift 2
-  local out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="$script" timeout 40 $APP 2>&1)
+  local out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="$script" timeout 40 $APP ${FILE:+"$FILE"} 2>&1)
   local rc=$?
   if [[ $rc -ne 0 ]]; then echo "✗ $name (exit $rc)"; fail=1; return; fi
   for exp in "$@"; do
@@ -87,6 +87,26 @@ run "tiled paste is one undo step" "input A1=5;; click A1;; key cmd+c;; select C
 run "sort keeps links" "input A1=b;; input A2=a;; link A1 https://b.example;; sortkeys A1:A2 A+;; linkof A2;; linkof A1" "LINK A2 https://b.example" "LINK A1 -"
 run "tab run ends on arrows" "click B2;; type 1;; key tab;; key down;; type 2;; key return;; state" "active=C4"
 run "internal link with quoted sheet" "key cmd+shift+n;; tab 0;; input A1=x;; followlink #'Foglio2'!C5;; sheets;; state" "current=1" "active=C5"
+# Window resize: the newly exposed cells, headers and chart/picture panes are drawn right away (not after the next scroll)
+run "growing the window draws the new cells" "$CHART_DATA;; chart column A1:B3;; setframe 1200 500;; visible;; setframe 1700 1100;; visible;; freeze B3;; setframe 1300 600;; setframe 1650 1050;; visible" \
+  "RESIZE 1 drawn=current headers=current scrollers=current panes=current" "RESIZE 2 drawn=current headers=current scrollers=current panes=current grew=rows,cols" \
+  "RESIZE 3 drawn=current headers=current scrollers=current panes=current"
+run "growing an empty window 1200x800 to 1600x1100" "setframe 1200 800;; visible;; setframe 1600 1100;; visible" \
+  "RESIZE 1 drawn=current headers=current scrollers=current panes=current" "RESIZE 2 drawn=current headers=current scrollers=current panes=current grew=rows,cols"
+# A price list laid out like the ones Excel users send around (core/tests/fixtures/make_price_list_fixture.py):
+# header frozen as "frozenSplit", product photos in a group shape, merged rows with borders on every cell
+FILE=$ROOT/core/tests/fixtures/price_list_layout.xlsx run "price list: frozen header stays clickable after scrolling" \
+  "scroll 0 -300;; click D20;; state;; click A1;; state;; shiftclick F25;; state;; pic list" \
+  "active=C20 sel=C20:E20" "active=A1 sel=A1" "active=A1 sel=A1:F25" "PICTURES 3" "PICTURE 2 from=B1 to=B1" "incell=false"
+# Drag selection follows the pointer both ways (the range is always anchor..cell under the pointer, never accumulated)
+run "drag selection shrinks back" "select C4:E4;; merge;; freeze A3;; mousedown B5;; mousedrag D12;; state;; mousedrag B6;; state;; mousedrag A5;; state;; mousedrag E5;; state;; mouseup;; mousedown B3;; mousedrag D4;; state;; mousedrag B3;; mouseup;; state" \
+  "sel=B5:D12" "sel=B5:B6" "sel=A5:B5" "sel=B5:E5" "sel=B3:E4" "active=B3 sel=B3 "
+run "drag selection at 150% after autoscroll" "freeze A3;; zoom 1.5;; mousedown B5;; mousedrag B9;; mousedrag below;; mousedrag below;; mousedrag below;; mousedrag B2;; state;; mousedrag C1;; mouseup;; state" \
+  "sel=B2:B5" "active=B5 sel=B1:C5"
+FILE=$ROOT/core/tests/fixtures/price_list_layout.xlsx run "drag selection over merges and the frozen header" \
+  "scroll 0 -200;; mousedown B20;; mousedrag D25;; state;; mousedrag B14;; state;; mousedrag A1;; state;; mousedrag B21;; mouseup;; state" \
+  "sel=B20:E25" "sel=B14:B20" "sel=A1:E20" "active=B20 sel=B20:B21"
+run "zoom from the menu updates the status bar" "key cmd+opt+-;; zoomui;; key cmd+opt+-;; zoomui" "ZOOMUI 80% slider=80 grid=80" "ZOOMUI 65% slider=65 grid=65"
 if [[ -f ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx ]]; then
   out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)
   [[ $out -eq 4 ]] && echo "✓ charts of the first sheet load on open" || { echo "✗ charts on open (got $out)"; fail=1; }

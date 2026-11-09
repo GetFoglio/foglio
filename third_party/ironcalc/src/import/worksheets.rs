@@ -835,7 +835,8 @@ fn get_sheet_view(ws: &XmlNode) -> SheetView {
     }
 
     let sheet_view = sheet_view[0];
-    let show_grid_lines = sheet_view.attribute("showGridLines").unwrap_or("1") == "1";
+    // Foglio fork: xsd:boolean, "true"/"false" as well as "1"/"0".
+    let show_grid_lines = !matches!(sheet_view.attribute("showGridLines").map(str::trim), Some("0") | Some("false"));
 
     let pane = sheet_view
         .children()
@@ -845,7 +846,9 @@ fn get_sheet_view(ws: &XmlNode) -> SheetView {
     // 18.18.53 ST_PaneState (Pane State)
     // frozen, frozenSplit, split
     if pane.len() == 1 {
-        if let Some("frozen") = pane[0].attribute("state") {
+        // Foglio fork: "frozenSplit" (panes frozen after a split, written by Excel and LibreOffice) is shown frozen
+        // by Excel too; only a plain "split" isn't.
+        if let Some("frozen") | Some("frozenSplit") = pane[0].attribute("state") {
             // TODO: Should we assert that topLeft is consistent?
             // let top_left_cell = pane[0].attribute("topLeftCell").unwrap_or("A1").to_string();
 
@@ -1048,8 +1051,30 @@ mod tests {
     use crate::import::xml::XmlNode;
 
     use crate::import::worksheets::{
-        get_default_column_width, load_columns, load_hyperlinks, parse_cell_number, parse_reference,
+        get_default_column_width, get_sheet_view, load_columns, load_hyperlinks, parse_cell_number, parse_reference,
     };
+
+    #[test]
+    fn sheet_view_frozen_split_and_boolean_grid_lines() {
+        let view = |xml: &str| {
+            let doc = XmlNode::parse_str(&format!(
+                r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews>{xml}</sheetViews></worksheet>"#
+            ))
+            .unwrap();
+            let v = get_sheet_view(&doc);
+            (v.frozen_rows, v.frozen_columns, v.show_grid_lines)
+        };
+        // Excel keeps "frozenSplit" for panes frozen from a split: they are frozen.
+        assert_eq!(
+            view(r#"<sheetView showGridLines="0" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozenSplit"/></sheetView>"#),
+            (1, 0, false)
+        );
+        assert_eq!(view(r#"<sheetView workbookViewId="0"><pane xSplit="1" ySplit="2" topLeftCell="B3" state="frozen"/></sheetView>"#), (2, 1, true));
+        // A plain split is not frozen.
+        assert_eq!(view(r#"<sheetView workbookViewId="0"><pane xSplit="2000" ySplit="1500" state="split"/></sheetView>"#), (0, 0, true));
+        assert_eq!(view(r#"<sheetView showGridLines="false" workbookViewId="0"/>"#), (0, 0, false));
+        assert_eq!(view(r#"<sheetView showGridLines="true" workbookViewId="0"/>"#), (0, 0, true));
+    }
 
     #[test]
     fn cell_numbers_are_finite() {

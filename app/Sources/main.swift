@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         Perf.shared.mark("DID_FINISH")
         // Command-line paths (handy for scripts/tests): open them like Finder would.
-        let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
+        let args = AppDelegate.pathArguments.filter { FileManager.default.fileExists(atPath: $0) }
         for path in args {
             NSDocumentController.shared.openDocument(withContentsOf: URL(fileURLWithPath: path), display: true) { [weak self] _, _, err in
                 if let err {
@@ -29,10 +29,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         setUpBenchmarks()
         if !Perf.shared.enabled { NSApp.activate() }
+        // Scripted runs open their blank workbook themselves: AppKit's launch-time untitled document depends on how
+        // the process was started (it never comes when another copy of Foglio is already running).
+        else if AppDelegate.pathArguments.isEmpty { NSDocumentController.shared.newDocument(nil) }
     }
 
+    /// Command-line arguments that are paths (not `-Key value` user-default pairs such as `-ApplePersistenceIgnoreState YES`).
+    static let pathArguments: [String] = {
+        var out: [String] = [], skipValue = false
+        for a in CommandLine.arguments.dropFirst() {
+            if skipValue { skipValue = false; continue }
+            if a.hasPrefix("-") { skipValue = true; continue }
+            out.append(a)
+        }
+        return out
+    }()
+
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }.isEmpty
+        AppDelegate.pathArguments.isEmpty && !Perf.shared.enabled
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -186,6 +200,11 @@ enum Snapshot {
 
 /// Tiny scripting hook for automated UI checks: "select B4:D9; type =SUM(B2:B5); key return; ..."
 enum UIScript {
+    /// State of the "visible" command between steps.
+    static var lastVisible: (rows: ClosedRange<Int>, cols: ClosedRange<Int>)?
+    static var visibleCount = 0
+    /// Pointer of the last mousedown/mousedrag step (window coordinates).
+    static var lastMouse = NSPoint.zero
     /// Runs steps one per run-loop turn (80 ms apart) so popups, focus changes and redraws happen like real use.
     static func runAsync(_ script: String, on c: SheetWindowController, done: @escaping () -> Void) {
         var steps = script.components(separatedBy: ";;").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -429,6 +448,63 @@ enum UIScript {
                 for w in NSApp.windows where w.isVisible && (w is CompletionPopup || w is HintPopup) {
                     print("POPUP \(type(of: w)) \((w as? CompletionPopup)?.items.prefix(5).joined(separator: ",") ?? "")")
                 }
+            case "setframe": // setframe 1400 900: resizes the window (top-left corner fixed), like dragging its corner
+                let p = arg.split(separator: " ").compactMap { Double($0) }
+                if p.count == 2, let w = c.window {
+                    w.windowController?.windowFrameAutosaveName = ""   // a test must not change the size the user's windows open with
+                    w.setFrameAutosaveName("")
+                    var f = w.frame
+                    f.origin.y += f.height - p[1]
+                    f.size = NSSize(width: p[0], height: p[1])
+                    w.setFrame(f, display: true)
+                }
+            case "mousedown", "mousedrag", "mouseup": // a drag in steps: mousedown B2;; mousedrag D9;; mousedrag above;; mouseup
+                // Points: a cell (its centre) or above/below/left/right (20 pt outside the grid, where autoscroll kicks in).
+                guard let w = c.window else { break }
+                let g = c.grid!
+                var p = UIScript.lastMouse
+                if let ref = parseA1(arg) { p = g.windowPoint(for: ref) }
+                else if !arg.isEmpty {
+                    let b = g.convert(g.bounds, to: nil)   // window coordinates, y up
+                    switch arg {
+                    case "above": p.y = b.maxY + 20
+                    case "below": p.y = b.minY - 20
+                    case "left": p.x = b.minX - 20
+                    case "right": p.x = b.maxX + 20
+                    default: break
+                    }
+                }
+                UIScript.lastMouse = p
+                let type: NSEvent.EventType = verb == "mousedown" ? .leftMouseDown : verb == "mouseup" ? .leftMouseUp : .leftMouseDragged
+                if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    NSApp.sendEvent(e)   // the window routes drags and the release to the view that took the press
+                }
+            case "zoomui": print("ZOOMUI \(c.zoomStatusForTesting) grid=\(Int((c.grid.zoom * 100).rounded()))")   // the status bar's zoom
+            case "scroll": // scroll 0 -600: a trackpad scroll by (dx, dy) points (negative dy = towards the end of the sheet)
+                let p = arg.split(separator: " ").compactMap { Int32($0) }
+                if p.count == 2, let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: p[1], wheel2: p[0], wheel3: 0),
+                   let e = NSEvent(cgEvent: cg) { c.grid.scrollWheel(with: e) }
+            case "visible": // the cells that fit in the grid now, whether the last draw covered them, and the drawing panes
+                let g = c.grid!
+                let v = g.visibleRangeForTesting
+                func span(_ r: ClosedRange<Int>, cols: Bool) -> String { cols ? "\(columnName(r.lowerBound))-\(columnName(r.upperBound))" : "\(r.lowerBound + 1)-\(r.upperBound + 1)" }
+                print("VISIBLE rows=\(span(v.rows, cols: false)) cols=\(span(v.cols, cols: true)) size=\(Int(g.bounds.width))x\(Int(g.bounds.height))")
+                let d = g.lastDrawn
+                let drawn = d.map { $0.rows == v.rows && $0.cols == v.cols && $0.size == g.bounds.size } ?? false
+                // The chart/picture panes reach the scroll bars (they clip the charts and pictures).
+                let sw = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+                let pane = g.chartLayer.mainPane.frame
+                let panes = abs(pane.maxX - (g.bounds.width - sw)) < 1 && abs(pane.maxY - (g.bounds.height - sw)) < 1
+                var grew = "-"
+                if let p = UIScript.lastVisible {
+                    grew = [v.rows.upperBound > p.rows.upperBound ? "rows" : nil, v.cols.upperBound > p.cols.upperBound ? "cols" : nil].compactMap { $0 }.joined(separator: ",")
+                }
+                UIScript.lastVisible = v
+                UIScript.visibleCount += 1
+                let h = g.lastDrawnHeaders
+                let headers = h.rows == v.rows && h.cols == v.cols
+                print("RESIZE \(UIScript.visibleCount) drawn=\(drawn ? "current" : "stale") headers=\(headers ? "current" : "stale") scrollers=\(g.scrollersFitForTesting ? "current" : "stale") panes=\(panes ? "current" : "stale") grew=\(grew.isEmpty ? "none" : grew)")
             case "chart": ChartsUI.script(arg, on: c)   // Foglio charts: see ChartsUI.script
             case "pic": PicturesUI.script(arg, on: c)   // Foglio pictures: see PicturesUI.script
             case "dump":

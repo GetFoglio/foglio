@@ -148,10 +148,24 @@ final class SheetPainter {
             }
         }
 
-        // 5. borders (per side: weight and colour)
+        // 5. borders (per side: weight and colour). Like Excel, a merged area shows only the borders on its outline:
+        // the sides its cells share inside the merge are not drawn (files store the border on every cell of the merge).
+        var mergeOf: [Int64: GridRange] = [:]
+        for m in visibleMerges where !m.isSingle {
+            for r in max(m.r0, rows.lowerBound)...min(m.r1, rows.upperBound) {
+                for c in max(m.c0, cols.lowerBound)...min(m.c1, cols.upperBound) { mergeOf[CellData.key(r, c)] = m }
+            }
+        }
         for c in data.cells where c.borderMask != 0 && rows.contains(c.row) && cols.contains(c.col) {
             let r = rect(c.row, c.col)
-            for side in 0..<4 where c.borderMask & (1 << side) != 0 {
+            var mask = c.borderMask
+            if let m = mergeOf[CellData.key(c.row, c.col)] {
+                if c.row > m.r0 { mask &= ~1 }   // top
+                if c.col < m.c1 { mask &= ~2 }   // right
+                if c.row < m.r1 { mask &= ~4 }   // bottom
+                if c.col > m.c0 { mask &= ~8 }   // left
+            }
+            for side in 0..<4 where mask & (1 << side) != 0 {
                 let w: CGFloat = [hair * 2, max(hair * 2, 1), 2, 3][c.borderWeight(side: side)]
                 let bc = c.borderColor(side: side)
                 (bc == VCell.noColor ? textColor : SheetPainter.rgb(bc)).setFill()

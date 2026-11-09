@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 /// the display (bucketed, so zooming doesn't re-decode at every step); the crop is applied when drawing.
 enum PictureRenderer {
     private final class Source { let src: CGImageSource; let size: CGSize; init(_ s: CGImageSource, _ z: CGSize) { src = s; size = z } }
-    private static let sources: NSCache<NSString, Source> = { let c = NSCache<NSString, Source>(); c.countLimit = 64; return c }()
+    /// Sources keep the encoded bytes: limited by size, so a sheet with hundreds of small product photos keeps them all.
+    private static let sources: NSCache<NSString, Source> = { let c = NSCache<NSString, Source>(); c.totalCostLimit = 128 << 20; return c }()
     private static let thumbs: NSCache<NSString, CGImage> = { let c = NSCache<NSString, CGImage>(); c.totalCostLimit = 192 << 20; return c }()
     private static let metafiles: NSCache<NSString, Metafile> = { let c = NSCache<NSString, Metafile>(); c.countLimit = 32; return c }()
 
@@ -32,7 +33,7 @@ enum PictureRenderer {
         if let o = (props[kCGImagePropertyOrientation] as? NSNumber)?.intValue, o >= 5 { swap(&w, &h) }
         guard w > 0, h > 0 else { return nil }
         let s = Source(src, CGSize(width: w, height: h))
-        sources.setObject(s, forKey: key as NSString)
+        sources.setObject(s, forKey: key as NSString, cost: data.count)
         return s
     }
 

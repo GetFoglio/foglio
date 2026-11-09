@@ -42,7 +42,23 @@ final class PictureLayer {
         }
         let x = g.x(p.from.col) + CGFloat(p.from.fx) * g.colW(p.from.col)
         let y = g.y(p.from.row) + CGFloat(p.from.fy) * g.rowH(p.from.row)
-        return CGRect(origin: CGPoint(x: x, y: y), size: p.size)
+        let k = displayScale(p, g)
+        return CGRect(x: x, y: y, width: p.size.width * k, height: p.size.height * k)
+    }
+
+    /// Pictures are sized in Excel pixels (EMU), but the grid has its own units: columns are wider than Excel's and
+    /// rows with a custom height a little shorter (1.25 pt per point instead of 4/3). Drawn at their EMU size, the
+    /// pictures of a sheet with tall custom rows (product photos in a price list) would spill over the next row's
+    /// text. A floating picture is therefore shrunk, aspect ratio kept, to fit the cells its anchor spans (`from`…`to`,
+    /// the corner where its size ends in the file's geometry). Never enlarged; 0 when a two-cell picture's cells are
+    /// all hidden (Excel hides it too).
+    func displayScale(_ p: PictureInfo, _ g: ChartGridGeometry) -> CGFloat {
+        guard !p.inCell, p.size.width > 0, p.size.height > 0 else { return 1 }
+        let box = g.rect(from: p.from, to: p.to)
+        if p.editAs == .twoCell && (box.width <= 0 || box.height <= 0) { return 0 }
+        guard box.width > 0, box.height > 0 else { return 1 }
+        let k = min(box.width / p.size.width, box.height / p.size.height)
+        return k < 0.995 ? k : 1
     }
 
     static func fit(aspect s: CGSize, in r: CGRect) -> CGRect {
@@ -80,10 +96,18 @@ final class PictureLayer {
         let f = all.insetBy(dx: -PictureView.margin, dy: -PictureView.margin).integral
         let picRect = pic.offsetBy(dx: -f.minX, dy: -f.minY)
         let fullRect = v.cropState.map { toPane($0.full).offsetBy(dx: -f.minX, dy: -f.minY) }
-        // Scrolling only moves the frame: redraw when what is drawn inside it changes.
-        if picRect != v.pictureRect || fullRect != v.fullRect || f.size != v.frame.size { v.needsDisplay = true }
-        v.pictureRect = picRect
-        v.fullRect = fullRect
+        // Scrolling only moves the frame: redraw when what is drawn inside it changes. Compared with a tolerance:
+        // the same rectangle recomputed after a scroll differs in the last bits (fractional anchors), and an exact
+        // comparison redrew (and re-decoded) every picture on screen at every scroll step.
+        func moved(_ a: CGRect?, _ b: CGRect?) -> Bool {
+            guard let a, let b else { return (a == nil) != (b == nil) }
+            return abs(a.minX - b.minX) > 0.01 || abs(a.minY - b.minY) > 0.01 || abs(a.width - b.width) > 0.01 || abs(a.height - b.height) > 0.01
+        }
+        if moved(picRect, v.pictureRect) || moved(fullRect, v.fullRect) || f.size != v.frame.size {
+            v.needsDisplay = true
+            v.pictureRect = picRect
+            v.fullRect = fullRect
+        }
         if v.frame != f { v.frame = f }
     }
 
@@ -146,7 +170,10 @@ final class PictureLayer {
             update(index, patch)
             return
         }
-        update(index, PicturePatch(from: g.corner(at: r.origin), size: r.size, crop: crop))
+        // Back to the picture's own size (see displayScale): what the user dragged is what stays on screen.
+        let k = displayScale(p, g)
+        let size = k > 0 ? CGSize(width: r.width / k, height: r.height / k) : r.size
+        update(index, PicturePatch(from: g.corner(at: r.origin), size: size, crop: crop))
     }
 
     func restack(index: Int, _ how: String) {

@@ -12,7 +12,7 @@ pub struct Lexer {
 pub enum Token {
     Color(i32),              // [Red] or [Color 23]
     Condition(Compare, f64), // [<=100] (Comparator, number)
-    Currency(char),          // [$€] ($ currency symbol)
+    Currency(String),        // [$€] or [$€-407] (currency symbol; Foglio fork: any length, may be empty as in [$-410])
     Literal(char), // €, $, (, ), /, :, +, -, ^, ', {, }, <, =, !, ~, > and space or escaped \X
     Spacer(char),  // *X
     Ghost(char),   // _X
@@ -358,22 +358,29 @@ impl Lexer {
                             //  * hex LCID (old format)
                             //      Like [$$-409] (=1033 for en-US) or
                             //           [$$-40C] (=1036 for fr-FR)
+                            // Foglio fork: the symbol is everything up to '-' or ']' ("€", "CHF", "US$", or
+                            // nothing in a locale-only tag such as [$-410] in front of Italian dates).
                             self.read_next_char();
-                            if let Some(currency) = self.read_next_char() {
-                                // ignore the locale part for now, just check if it ends with ']'
-                                if Some('-') == self.peek_char() {
-                                    self.read_next_char();
-
-                                    while let Some(c) = self.peek_char() {
-                                        if c == ']' {
-                                            break;
-                                        }
-                                        self.read_next_char();
+                            let mut currency = String::new();
+                            while let Some(c) = self.peek_char() {
+                                if c == '-' || c == ']' {
+                                    break;
+                                }
+                                currency.push(c);
+                                self.read_next_char();
+                            }
+                            // ignore the locale part for now, just check if it ends with ']'
+                            if Some('-') == self.peek_char() {
+                                self.read_next_char();
+                                while let Some(c) = self.peek_char() {
+                                    if c == ']' {
+                                        break;
                                     }
+                                    self.read_next_char();
                                 }
-                                if self.read_next_char() == Some(']') {
-                                    return Token::Currency(currency);
-                                }
+                            }
+                            if self.read_next_char() == Some(']') {
+                                return Token::Currency(currency);
                             }
                             self.set_error("Failed to parse currency");
                             Token::ILLEGAL

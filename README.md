@@ -113,7 +113,7 @@ bars/icon sets, sparklines, threaded comments (shown as plain notes).
 ## Testing
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 69 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 76 UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```

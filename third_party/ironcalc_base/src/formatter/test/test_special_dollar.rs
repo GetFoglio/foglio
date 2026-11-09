@@ -9,12 +9,12 @@ use crate::formatter::lexer::{Lexer, Token};
 fn dollar_en_us() {
     let mut lexer = Lexer::new("[$$-en-US]");
     let token = lexer.next_token();
-    assert!(matches!(token, Token::Currency('$')));
+    assert_eq!(token, Token::Currency("$".to_string())); // Foglio fork: the symbol is a String
 }
 
 #[test]
 fn dollar_409() {
     let mut lexer = Lexer::new("[$$-409]");
     let token = lexer.next_token();
-    assert!(matches!(token, Token::Currency('$')));
+    assert_eq!(token, Token::Currency("$".to_string())); // Foglio fork: the symbol is a String
 }

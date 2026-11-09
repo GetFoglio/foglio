@@ -155,7 +155,8 @@ impl Parser {
         let mut exponent_digit_count = 0;
         let mut number = NumberState::Integer;
         let mut index = 0;
-        let mut currency = None;
+        // Foglio fork: currency symbols are tokens in place (see Token::Currency below); kept for the struct.
+        let currency: Option<char> = None;
         let mut is_time = false;
 
         while token != Token::EOF && token != Token::Separator {
@@ -214,7 +215,11 @@ impl Parser {
                     condition = Some((cmp, value));
                 }
                 Token::Currency(c) => {
-                    currency = Some(c);
+                    // Foglio fork: the symbol is written where it is in the format ("#,##0.00 [$€-407]" is
+                    // "1.234,50 €"), not always in front of the number.
+                    if !c.is_empty() {
+                        tokens.push(TextToken::Text(c));
+                    }
                 }
                 Token::QuestionMark => {
                     tokens.push(TextToken::Digit(Digit {

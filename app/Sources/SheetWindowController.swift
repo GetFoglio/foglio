@@ -585,6 +585,9 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         changed()
     }
 
+    func gridZoomChanged(_ g: GridView) { syncZoom() }
+    var zoomStatusForTesting: String { "\(zoomLabel.title) slider=\(Int(zoomSlider.doubleValue.rounded()))" }
+
     func gridModeChanged(_ g: GridView) {
         cancelButton.isEnabled = g.isEditing
         enterButton.isEnabled = g.isEditing
