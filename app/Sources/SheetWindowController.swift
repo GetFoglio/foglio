@@ -610,6 +610,15 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     }
     @objc private func percentAction(_ sender: Any?) { grid.setStyle("num_fmt", "0%") }
     @objc private func thousandsAction(_ sender: Any?) { grid.setStyle("num_fmt", "#,##0.00") }
+    @objc func formatCells(_ sender: Any?) {
+        grid.commitEditing(move: nil)
+        let vc = FormatCellsController(book: grid.book, sheet: grid.sheet, cell: grid.active) { [weak self] code in
+            self?.grid.setStyle("num_fmt", code)
+        }
+        let w = NSWindow(contentViewController: vc)
+        w.title = L("Format Cells")
+        window?.beginSheet(w)
+    }
     @objc func increaseDecimals(_ sender: Any?) { adjustDecimals(1) }
     @objc func decreaseDecimals(_ sender: Any?) { adjustDecimals(-1) }
     private func adjustDecimals(_ d: Int) {

@@ -15,6 +15,7 @@ final class SpreadsheetDocument: NSDocument {
 
     override class var autosavesInPlace: Bool { false }
     override class var preservesVersions: Bool { false }
+    override var autosavingFileType: String? { FileTypes.xlsx }
 
     override func makeWindowControllers() {
         addWindowController(SheetWindowController(document: self))

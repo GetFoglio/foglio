@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FormulaLocale.current.apply()
         NSApp.mainMenu = Menus.mainMenu()
         NSWindow.allowsAutomaticWindowTabbing = true
+        // Crash safety: unsaved changes are backed up every 30 s and offered again after a crash.
+        NSDocumentController.shared.autosavingDelay = 30
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
