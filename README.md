@@ -7,7 +7,7 @@
 <p align="center">
   A lightweight, native spreadsheet for macOS.<br>
   Excel-like, open formats, tiny footprint.<br>
-  <a href="https://getfoglio.app">getfoglio.app</a> · <a href="https://github.com/Acid236/foglio/releases/latest">Download</a>
+  <a href="https://getfoglio.app">getfoglio.app</a> · <a href="https://github.com/GetFoglio/foglio/releases/latest">Download</a>
 </p>
 
 ---
