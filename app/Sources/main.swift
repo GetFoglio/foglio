@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let env = ProcessInfo.processInfo.environment
@@ -143,21 +144,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Renders a window's content to PNG (for automated visual checks; no screen-recording permission needed).
 enum Snapshot {
+    /// Renders the whole window (title bar, toolbar controls, grid) from its layer tree to PNG.
+    /// No screen-recording permission needed: the app draws itself.
     static func write(_ window: NSWindow?, to path: String) {
-        guard let v = window?.contentView else { return }
-        let data = v.dataWithPDF(inside: v.bounds)
-        guard let pdf = NSPDFImageRep(data: data) else { return }
-        let scale: CGFloat = 2
-        let size = NSSize(width: v.bounds.width * scale, height: v.bounds.height * scale)
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
-                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: size).fill()
-        pdf.draw(in: NSRect(origin: .zero, size: size))
-        NSGraphicsContext.restoreGraphicsState()
+        guard let w = window, let frameView = w.contentView?.superview else { return }
+        frameView.wantsLayer = true
+        frameView.layoutSubtreeIfNeeded()
+        frameView.displayIfNeeded()
+        CATransaction.flush()
+        let scale = w.backingScaleFactor
+        let size = frameView.bounds.size
+        guard let layer = frameView.layer,
+              let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        ctx.scaleBy(x: scale, y: scale)
+        if !frameView.isFlipped { ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1) }
+        ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1)   // CALayer render is y-up
+        layer.render(in: ctx)
+        // Child windows (autocomplete list, hints) on top, at their positions relative to the window.
+        for child in w.childWindows ?? [] where child.isVisible {
+            guard let cl = child.contentView?.superview?.layer ?? child.contentView?.layer else { continue }
+            child.contentView?.superview?.wantsLayer = true
+            let r = child.frame
+            ctx.saveGState()
+            ctx.translateBy(x: r.minX - w.frame.minX, y: r.minY - w.frame.minY)
+            cl.render(in: ctx)
+            ctx.restoreGState()
+        }
+        guard let img = ctx.makeImage() else { return }
+        let rep = NSBitmapImageRep(cgImage: img)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 }
