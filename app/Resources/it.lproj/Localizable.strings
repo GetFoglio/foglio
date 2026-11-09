@@ -387,3 +387,6 @@
 "e.g. Yes;No;Maybe  or  =$A$1:$A$10" = "es. Sì;No;Forse  oppure  =$A$1:$A$10";
 "Default" = "Predefinito";
 "Font" = "Carattere";
+"This workbook is protected with a password. Foglio can't open encrypted files yet." = "Questa cartella di lavoro è protetta da password. Foglio non può ancora aprire file crittografati.";
+"This file is in a very old Excel format (Excel 4 or earlier) that Foglio can't read." = "Questo file è in un formato Excel molto vecchio (Excel 4 o precedente) che Foglio non può leggere.";
+"The file is damaged or isn't a valid spreadsheet." = "Il file è danneggiato o non è un foglio di calcolo valido.";
