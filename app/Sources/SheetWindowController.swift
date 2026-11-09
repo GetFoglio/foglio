@@ -89,6 +89,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     private var alignButtons: [NSButton] = []
     private let fontSizeBox = NSComboBox()
     private let fontFamilyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let fontPreviewer = FontMenuPreviewer()
     private let numberFormatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let textColor = ColorButton(symbol: "textformat", tip: L("Font Color"), initial: NSColor(srgbRed: 0.75, green: 0, blue: 0, alpha: 1),
                                         allowsNone: true, noneTitle: L("Automatic"))
@@ -216,10 +217,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         fontFamilyPopup.font = .systemFont(ofSize: 11)
         fontFamilyPopup.addItem(withTitle: L("Default"))
         fontFamilyPopup.menu?.addItem(.separator())
-        for f in SheetWindowController.fontFamilies {
-            fontFamilyPopup.addItem(withTitle: f)
-            if let font = NSFont(name: f, size: 12) { fontFamilyPopup.lastItem?.attributedTitle = NSAttributedString(string: f, attributes: [.font: font]) }
-        }
+        for f in SheetWindowController.fontFamilies { fontFamilyPopup.addItem(withTitle: f) }
+        fontFamilyPopup.menu?.delegate = fontPreviewer   // font previews are loaded only when the menu opens (fast launch)
         fontFamilyPopup.target = self
         fontFamilyPopup.action = #selector(fontFamilyChanged(_:))
         fontFamilyPopup.toolTip = L("Font")
@@ -862,4 +861,17 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         if let tv = nameBox.currentEditor() as? NSTextView { _ = control(nameBox, textView: tv, doCommandBy: #selector(NSResponder.insertNewline(_:))) }
     }
     func selectSheetForTesting(_ i: Int) { switchTo(sheet: i) }
+}
+
+
+/// Shows each font name in its own typeface, lazily.
+final class FontMenuPreviewer: NSObject, NSMenuDelegate {
+    private var done = false
+    func menuWillOpen(_ menu: NSMenu) {
+        guard !done else { return }
+        done = true
+        for item in menu.items.dropFirst() where !item.isSeparatorItem {
+            if let font = NSFont(name: item.title, size: 12) { item.attributedTitle = NSAttributedString(string: item.title, attributes: [.font: font]) }
+        }
+    }
 }

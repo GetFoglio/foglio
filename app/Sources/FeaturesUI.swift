@@ -180,8 +180,7 @@ extension SheetWindowController {
     static let fontFamilies: [String] = {
         let common = ["Arial", "Avenir Next", "Calibri", "Courier New", "Georgia", "Gill Sans", "Helvetica", "Helvetica Neue",
                       "Menlo", "Palatino", "Times New Roman", "Trebuchet MS", "Verdana"]
-        let installed = Set(NSFontManager.shared.availableFontFamilies)
-        return common.filter { installed.contains($0) || $0 == "Calibri" }
+        return common   // availability is checked lazily when rendering (falls back to the system font)
     }()
 
     @objc func fontFamilyChanged(_ sender: NSPopUpButton) {
