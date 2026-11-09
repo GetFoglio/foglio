@@ -42,7 +42,7 @@ enum ConditionalFormatMenu {
 extension SheetWindowController {
     @objc func conditionalRule(_ sender: NSMenuItem) {
         guard let rule = ConditionalFormatMenu.highlight[safe: sender.tag], let w = window else { return }
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         let range = grid.selection
         let a = NSAlert()
         a.messageText = L(rule.title).replacingOccurrences(of: "…", with: "")
@@ -77,13 +77,13 @@ extension SheetWindowController {
 
     @objc func conditionalScale(_ sender: NSMenuItem) {
         guard let s = ConditionalFormatMenu.scales[safe: sender.tag] else { return }
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         _ = grid.book.addConditionalFormat(sheet: grid.sheet, grid.selection, kind: s.1)
         grid.contentChanged()
     }
 
     @objc func clearConditionalRules(_ sender: NSMenuItem) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         grid.book.clearConditionalFormats(sheet: grid.sheet, sender.tag == 0 ? grid.selection : nil)
         grid.contentChanged()
     }

@@ -353,6 +353,27 @@ enum UIScript {
                 let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
                 if p.count == 2, let r = parseA1(p[0]) { print("CHECK \(c.grid.book.checkValidation(sheet: c.grid.sheet, row: r.row, col: r.col, p[1]).code)") }
             case "listitems": print("ITEMS \(c.grid.validationListItems()?.joined(separator: ",") ?? "-")")
+            case "pick": if let i = Int(arg) { c.grid.pickValidationItemForTesting(i) }   // pick 0: first item of the active cell's list
+            case "validwarn": // validwarn A1:A5 Sì;No  (list rule with Warning alerts)
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let r = FormulaText.gridRange(p[0].uppercased()) {
+                    try? c.grid.book.setValidation(sheet: c.grid.sheet, r, rule: ["type": "list", "formula1": p[1], "inCellDropdown": true, "showErrorMessage": true, "errorStyle": "warning"])
+                    c.grid.contentChanged()
+                }
+            case "alertbutton": // alertbutton 1: answers the window's alert sheet with its first button
+                if let w = c.window, let sheet = w.attachedSheet, let n = Int(arg) {
+                    print("ALERT \(n)")
+                    w.endSheet(sheet, returnCode: NSApplication.ModalResponse(rawValue: 1000 + n - 1))
+                }
+            case "link": // link A1 https://…
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let r = parseA1(p[0]) { c.grid.book.setLink(sheet: c.grid.sheet, row: r.row, col: r.col, address: p[1], display: nil); c.grid.contentChanged() }
+            case "linkof": if let r = parseA1(arg) { print("LINK \(arg) \(c.grid.book.link(sheet: c.grid.sheet, row: r.row, col: r.col)?.address ?? "-")") }
+            case "defname": // defname Name formula
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2 { do { try c.grid.book.defineName(p[0], scope: nil, formula: p[1]) } catch { print("DEFNAME err \(error)") } }
+            case "names": for n in c.grid.book.definedNames { print("NAMEDEF \(n.name)=\(n.formula)") }
+            case "followlink": c.grid.followLink(arg)
             case "font": c.grid.setStyle("font.name", arg)
             case "tabcolor": c.grid.book.setSheetColor(c.grid.sheet, UInt32(arg, radix: 16) ?? 0); c.reloadTabs()
             case "summarize": // summarize A1:C10 groupCol valueCol agg
@@ -367,6 +388,7 @@ enum UIScript {
                 case "pastespecial": c.grid.pasteSpecial(nil)
                 case "names": c.nameManager(nil)
                 case "insertcells": c.grid.insertCellsDialog(nil)
+                case "summarize": c.summarize(nil)
                 default: break
                 }
             case "sortkeys": // sortkeys A2:B5 A+ B-

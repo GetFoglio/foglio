@@ -41,7 +41,9 @@ final class ChartPane: NSView {
 
 /// Owns the chart views of the grid's current sheet and keeps them positioned on the cells.
 final class ChartLayer {
-    private unowned let grid: GridView
+    /// Weak: the grid owns this layer; pending async work must not outlive a closed window.
+    private weak var grid: GridView?
+    let book: Workbook
     /// Charts anchored in frozen rows/columns (above everything) and charts in the scrolling part (clipped by the frozen panes).
     private let mainPane = ChartPane(), scrollPane = ChartPane()
     private(set) var views: [ChartView] = []
@@ -51,6 +53,7 @@ final class ChartLayer {
 
     init(grid: GridView) {
         self.grid = grid
+        self.book = grid.book
         for p in [mainPane, scrollPane] {
             p.wantsLayer = true
             p.clipsToBounds = true
@@ -58,9 +61,8 @@ final class ChartLayer {
         }
     }
 
-    var book: Workbook { grid.book }
-    var sheet: Int { grid.sheet }
-    var zoom: CGFloat { grid.zoom }
+    var sheet: Int { grid?.sheet ?? 0 }
+    var zoom: CGFloat { grid?.zoom ?? 1 }
     var selectedIndex: Int? { selected }
 
     /// Re-reads the charts of the sheet (after any change to the workbook or a sheet switch).
@@ -80,6 +82,7 @@ final class ChartLayer {
 
     /// Positions the panes and the charts (after scrolling, zooming, resizing, freezing).
     func layoutCharts() {
+        guard let grid else { return }
         let g = grid.chartGeometry()
         lastHeader = g.header
         let z = g.zoom
@@ -103,9 +106,9 @@ final class ChartLayer {
 
     /// The row header grows with the row numbers on screen: follow it.
     func gridDidDraw() {
-        guard !views.isEmpty else { return }
+        guard !views.isEmpty, let grid else { return }
         let h = grid.chartGeometry().header
-        if h != lastHeader { DispatchQueue.main.async { self.layoutCharts() } }
+        if h != lastHeader { DispatchQueue.main.async { [weak self] in self?.layoutCharts() } }
     }
 
     // MARK: Selection and edits
@@ -113,7 +116,7 @@ final class ChartLayer {
     func select(_ index: Int?, focus: Bool = true) {
         selected = index
         for v in views { v.isSelected = v.info?.index == index }
-        if let i = index, focus, let v = views[safe: i] { grid.window?.makeFirstResponder(v) }
+        if let i = index, focus, let v = views[safe: i] { grid?.window?.makeFirstResponder(v) }
     }
 
     func deselect(_ v: ChartView) {
@@ -123,17 +126,18 @@ final class ChartLayer {
 
     /// After an engine change: mark the document edited and redraw (keeps the selection).
     func committed() {
-        grid.contentChanged()
+        grid?.contentChanged()
     }
 
     func delete(index: Int) {
         guard book.deleteChart(sheet: sheet, index: index) else { return }
         selected = nil
         committed()
-        grid.window?.makeFirstResponder(grid)
+        if let grid { grid.window?.makeFirstResponder(grid) }
     }
 
     func setAnchor(index: Int, logical r: CGRect) {
+        guard let grid else { return }
         let g = grid.chartGeometry()
         let a = g.corner(at: CGPoint(x: r.minX, y: r.minY)), b = g.corner(at: CGPoint(x: r.maxX, y: r.maxY))
         book.setChartAnchor(sheet: sheet, index: index, from: a, to: b)
@@ -142,16 +146,17 @@ final class ChartLayer {
 
     /// Converts a rectangle of a pane (view points) into logical grid coordinates.
     func logicalRect(_ r: CGRect, in pane: NSView) -> CGRect {
+        guard let grid else { return r }
         let gr = grid.convert(r, from: pane)
         return CGRect(x: gr.minX / zoom, y: gr.minY / zoom, width: gr.width / zoom, height: gr.height / zoom)
     }
 
     func showProperties(index: Int) {
-        guard let w = grid.window, let info = charts[safe: index] else { return }
+        guard let w = grid?.window, let info = charts[safe: index] else { return }
         ChartPropertiesSheet(layer: self, info: info).begin(on: w)
     }
 
-    var gridView: GridView { grid }
+    var gridView: GridView? { grid }
 }
 
 /// One chart on the sheet: draws it, selection handles, move/resize by dragging, Delete key, context menu.
@@ -299,7 +304,7 @@ final class ChartView: NSView, NSMenuItemValidation {
         chartLayer.setAnchor(index: info.index, logical: r)
     }
 
-    override func scrollWheel(with e: NSEvent) { chartLayer.gridView.scrollWheel(with: e) }
+    override func scrollWheel(with e: NSEvent) { chartLayer.gridView?.scrollWheel(with: e) }
 
     // MARK: Keyboard and commands
 
@@ -643,7 +648,7 @@ extension SheetWindowController {
     /// Inserts a chart for the selection (or the data region around the active cell), right of the data.
     func insertChart(kind: ChartKind) {
         guard let grid else { return }
-        if grid.isEditing { grid.commitEditing(move: nil) }
+        guard grid.commitIfEditing() else { return }
         var r = grid.selection
         let region = grid.book.currentRegion(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)
         if r.isSingle { r = region }

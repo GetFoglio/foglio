@@ -20,7 +20,7 @@ extension SheetWindowController {
     // MARK: Comments (Excel "Notes")
 
     @objc func editComment(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         let c = grid.active
         let existing = grid.book.comment(sheet: grid.sheet, row: c.row, col: c.col)
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 110))
@@ -58,7 +58,7 @@ extension SheetWindowController {
     // MARK: Hyperlinks (⌘K)
 
     @objc func insertLink(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         let c = grid.active
         let current = grid.book.link(sheet: grid.sheet, row: c.row, col: c.col)
         let text = NSTextField(string: grid.book.formatted(sheet: grid.sheet, row: c.row, col: c.col))
@@ -72,9 +72,8 @@ extension SheetWindowController {
         sheetAlert(L("Insert Link"), accessory: g, extra: current == nil ? nil : L("Remove Link")) { [weak self] r in
             guard let self else { return }
             if r == .alertFirstButtonReturn {
-                var a = address.stringValue.trimmingCharacters(in: .whitespaces)
+                let a = Workbook.normalizedLinkAddress(address.stringValue)
                 guard !a.isEmpty else { return }
-                if !a.hasPrefix("#") && !a.contains(":") { a = a.contains("@") ? "mailto:" + a : "https://" + a }
                 self.grid.book.setLink(sheet: self.grid.sheet, row: c.row, col: c.col, address: a, display: text.stringValue)
             } else if r == .alertThirdButtonReturn {
                 self.grid.book.removeLink(sheet: self.grid.sheet, row: c.row, col: c.col)
@@ -112,7 +111,7 @@ extension SheetWindowController {
     // MARK: Data validation
 
     @objc func dataValidation(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         guard let w = window else { return }
         let range = grid.selection
         let vc = DataValidationController(rule: grid.book.validation(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)) { [weak self] rule in
@@ -136,12 +135,14 @@ extension SheetWindowController {
     // MARK: Summarize by (pivot-lite)
 
     @objc func summarize(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         let s = grid.selection
         var r = s.isSingle ? grid.book.currentRegion(sheet: grid.sheet, row: grid.active.row, col: grid.active.col) : s
         let l = grid.book.layout(sheet: grid.sheet)
+        // Clip to the used range; a selection below or right of the data holds nothing to summarize.
+        guard r.r0 <= l.maxRow, r.c0 <= l.maxCol else { NSSound.beep(); return }
         r = GridRange(r0: r.r0, c0: r.c0, r1: min(r.r1, l.maxRow), c1: min(r.c1, l.maxCol))
-        guard r.rows >= 2 else { NSSound.beep(); return }
+        guard r.rows >= 2, r.c0 <= r.c1 else { NSSound.beep(); return }
         let headers = grid.book.viewport(sheet: grid.sheet, rows: r.r0...r.r0, cols: r.c0...r.c1)
         func title(_ c: Int) -> String {
             let t = headers.first { $0.col == c }?.text ?? ""

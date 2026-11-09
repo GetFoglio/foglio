@@ -13,7 +13,7 @@ extension SheetWindowController {
     }
 
     @objc func defineName(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         guard let w = window else { return }
         let a = NSAlert()
         a.messageText = L("Define Name")
@@ -53,16 +53,8 @@ extension SheetWindowController {
     /// Jumps to a defined name's range; returns false if the name is unknown or not a plain range.
     @discardableResult
     func goToName(_ name: String) -> Bool {
-        guard let n = grid.book.definedNames.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return false }
-        var f = n.formula.trimmingCharacters(in: CharacterSet(charactersIn: "= "))
-        var sheetIndex = grid.sheet
-        if let bang = f.lastIndex(of: "!") {
-            let sname = String(f[..<bang]).trimmingCharacters(in: CharacterSet(charactersIn: "'")).replacingOccurrences(of: "''", with: "'")
-            if let i = grid.book.sheetNames.firstIndex(of: sname) { sheetIndex = i }
-            f = String(f[f.index(after: bang)...])
-        }
-        guard let r = FormulaText.gridRange(f.replacingOccurrences(of: "$", with: "").uppercased()) else { return false }
-        if sheetIndex != grid.sheet { selectSheetForTesting(sheetIndex) }
+        guard let (sheetIndex, r) = grid.book.resolveName(name, currentSheet: grid.sheet) else { return false }
+        if sheetIndex != grid.sheet { switchToSheet(sheetIndex) }
         grid.select(range: r)
         window?.makeFirstResponder(grid)
         return true

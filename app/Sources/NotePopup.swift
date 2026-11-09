@@ -7,19 +7,12 @@ final class NotePopup: NSPanel {
     init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 220, height: 60), styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: true)
+        isReleasedWhenClosed = false
         level = .floating
         hasShadow = true
         isOpaque = false
         backgroundColor = .clear
-        let box = NSView()
-        box.wantsLayer = true
-        box.layer?.backgroundColor = NSColor(name: nil) { a in
-            a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 0.27, green: 0.26, blue: 0.2, alpha: 1)
-                                                                : NSColor(srgbRed: 1, green: 0.98, blue: 0.83, alpha: 1)
-        }.cgColor
-        box.layer?.cornerRadius = 4
-        box.layer?.borderWidth = 0.5
-        box.layer?.borderColor = NSColor.separatorColor.cgColor
+        let box = NoteBox()
         label.font = .systemFont(ofSize: 11.5)
         label.textColor = .labelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -42,8 +35,34 @@ final class NotePopup: NSPanel {
     }
 
     func hide() {
-        guard isVisible else { return }
+        guard isVisible || parent != nil else { return }
         parent?.removeChildWindow(self)
         orderOut(nil)
+    }
+}
+
+/// The note's yellow box: colours are resolved for the current appearance on every update.
+private final class NoteBox: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+    override func updateLayer() {
+        guard let layer else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            layer.backgroundColor = (dark ? NSColor(srgbRed: 0.27, green: 0.26, blue: 0.2, alpha: 1)
+                                          : NSColor(srgbRed: 1, green: 0.98, blue: 0.83, alpha: 1)).cgColor
+            layer.borderColor = NSColor.separatorColor.cgColor
+        }
+        layer.cornerRadius = 4
+        layer.borderWidth = 0.5
     }
 }

@@ -226,11 +226,27 @@ final class ColorPaletteController: NSViewController {
 
     @objc private func pickNone() { pick(nil) }
 
+    /// The palette the shared colour panel currently reports to (its target is not retained).
+    private static var panelOwner: ObjectIdentifier?
+
     @objc private func moreColors() {
         let panel = NSColorPanel.shared
+        panel.isContinuous = false   // one colour (and one undo step) per pick, not one per drag step
         panel.setTarget(self)
         panel.setAction(#selector(colorPanelChanged(_:)))
+        ColorPaletteController.panelOwner = ObjectIdentifier(self)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    deinit {
+        // The panel's target is unretained: never leave it pointing at a freed palette.
+        // (Not cleared when the popover closes: using the panel closes the transient popover.)
+        if ColorPaletteController.panelOwner == ObjectIdentifier(self) {
+            ColorPaletteController.panelOwner = nil
+            let panel = NSColorPanel.shared
+            panel.setTarget(nil)
+            panel.setAction(nil)
+        }
     }
 
     @objc private func colorPanelChanged(_ p: NSColorPanel) { pick(p.color) }

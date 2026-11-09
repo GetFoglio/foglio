@@ -23,7 +23,9 @@ struct CellData {
 /// Draws cells (fills, grid lines, text, borders, merges). Shared by the grid and printing.
 final class SheetPainter {
     /// Excel font points -> screen points.
-    var fontScale: CGFloat = 12.0 / 11.0
+    var fontScale: CGFloat = 12.0 / 11.0 {
+        didSet { if fontScale != oldValue { fontCache.removeAll(); attrCache.removeAll() } }   // fonts are sized by it
+    }
     var printing = false
     private var attrCache: [Int: [NSAttributedString.Key: Any]] = [:]
     private var fontCache: [Int: NSFont] = [:]

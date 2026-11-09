@@ -182,8 +182,9 @@ struct ChartRenderer {
             hi == lo ? a : a + CGFloat((v - lo) / (hi - lo)) * (b - a)
         }
         var ticks: [Double] {
-            guard step > 0 else { return [lo] }
-            let n = Int(((hi - lo) / step).rounded())
+            let span = ((hi - lo) / step).rounded()
+            guard step > 0, span.isFinite else { return lo.isFinite ? [lo] : [0] }
+            let n = Int(min(span, 1_000))
             return (0...max(0, min(n, 200))).map { lo + Double($0) * step }
         }
     }
@@ -192,6 +193,8 @@ struct ChartRenderer {
     static func niceScale(min mn: Double, max mx: Double, maxTicks: Int, includeZero: Bool = true) -> Scale {
         var lo = mn, hi = mx
         if !lo.isFinite || !hi.isFinite { lo = 0; hi = 1 }
+        // Keep the span finite (hi - lo would overflow to infinity near ±Double.greatestFiniteMagnitude).
+        lo = max(lo, -1e300); hi = min(hi, 1e300)
         if includeZero {
             if lo > 0 && (hi - lo) / hi > 1.0 / 6 { lo = 0 }
             if hi < 0 && (lo - hi) / lo > 1.0 / 6 { hi = 0 }
@@ -207,6 +210,7 @@ struct ChartRenderer {
         // Like Excel, keep a little headroom above the largest value.
         if b == hi && hi > 0 && mx == hi && !(includeZero && hi == 0) && (hi - lo) / step < Double(maxTicks) { b += step }
         if a == lo && lo < 0 && mn == lo { a -= step }
+        guard step.isFinite, step > 0, a.isFinite, b.isFinite else { return Scale(lo: 0, hi: 1, step: 0.2) }
         return Scale(lo: a, hi: b, step: step)
     }
 

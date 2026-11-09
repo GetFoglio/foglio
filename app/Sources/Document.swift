@@ -141,6 +141,7 @@ final class PrintView: NSView {
         }
         painter.printing = true
         painter.fontScale = 1
+        painter.fontNameForId = { [weak book] id in book?.fontName(id: id) }
         layout = l
         printInfoRef = printInfo
         super.init(frame: .zero)
@@ -198,6 +199,14 @@ final class PrintView: NSView {
     }
 
     override func knowsPageRange(_ range: NSRangePointer) -> Bool {
+        // Orientation, paper size or scale may have changed in the Print panel: paginate for them.
+        if let info = NSPrintOperation.current?.printInfo {
+            let changed = info.paperSize != printInfoRef.paperSize || info.orientation != printInfoRef.orientation
+                || info.leftMargin != printInfoRef.leftMargin || info.rightMargin != printInfoRef.rightMargin
+                || info.topMargin != printInfoRef.topMargin || info.bottomMargin != printInfoRef.bottomMargin
+            printInfoRef = info
+            if changed || pages.isEmpty { relayout() }
+        }
         range.pointee = NSRange(location: 1, length: pages.count)
         return true
     }

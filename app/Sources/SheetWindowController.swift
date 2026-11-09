@@ -423,9 +423,18 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         }
     }
 
+    /// Finishes an in-cell edit before a command that changes sheets; false if the edit could not be
+    /// committed (a data validation alert is waiting for an answer).
+    private func commitBeforeSheetCommand() -> Bool {
+        if grid.hasPendingCommit { NSSound.beep(); return false }
+        if grid.isEditing && !grid.commitEditing(move: nil) { return false }
+        return true
+    }
+
     private func dropTab(_ sheet: Int, atX x: CGFloat) {
         let tabs = tabsStack.arrangedSubviews.compactMap { $0 as? SheetTab }
         guard let target = tabs.first(where: { $0.frame.maxX > x })?.tag ?? tabs.last?.tag, target != sheet else { return }
+        guard commitBeforeSheetCommand() else { return }
         grid.clearAllFilters()
         grid.book.moveSheet(sheet, to: target)
         switchTo(sheet: target)
@@ -451,11 +460,17 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         return m
     }
 
-    private func switchTo(sheet i: Int) {
-        if grid.isEditing && !grid.isPointing { grid.commitEditing(move: nil) }
+    private func switchTo(sheet i: Int) { switchToSheet(i) }
+
+    /// Shows sheet i (commits a pending edit first, unless a formula is pointing at cells).
+    @discardableResult
+    func switchToSheet(_ i: Int) -> Bool {
+        if grid.hasPendingCommit { NSSound.beep(); return false }
+        if grid.isEditing && !grid.isPointing && !grid.commitEditing(move: nil) { return false }
         grid.sheet = i
         doc?.activeSheet = i
         reloadTabs()
+        return true
     }
 
     @objc private func selectSheet(_ sender: NSButton) { switchTo(sheet: sender.tag) }
@@ -504,11 +519,11 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     }
 
     @objc func moveSheetLeft(_ sender: Any?) {
-        guard grid.sheet > 0 else { return }
+        guard grid.sheet > 0, commitBeforeSheetCommand() else { return }
         grid.clearAllFilters(); grid.book.moveSheet(grid.sheet, to: grid.sheet - 1); switchTo(sheet: grid.sheet - 1); changed()
     }
     @objc func moveSheetRight(_ sender: Any?) {
-        guard grid.sheet < grid.book.sheetNames.count - 1 else { return }
+        guard grid.sheet < grid.book.sheetNames.count - 1, commitBeforeSheetCommand() else { return }
         grid.clearAllFilters(); grid.book.moveSheet(grid.sheet, to: grid.sheet + 1); switchTo(sheet: grid.sheet + 1); changed()
     }
     @objc func hideSheet(_ sender: Any?) {
@@ -645,6 +660,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
                 grid.select(range: r)
             } else if goToName(text) {
                 return true
+            } else if grid.book.nameExists(text) {
+                // An existing name that is not a plain range (a constant, a formula): never redefine it here.
+                NSSound.beep()
+                gridSelectionChanged(grid)
             } else if !text.isEmpty, text.range(of: "^[A-Za-z_\\p{L}][A-Za-z0-9_.\\p{L}]*$", options: .regularExpression) != nil {
                 // Excel: typing a new name in the Name Box names the selection.
                 do { try grid.book.defineName(text, scope: nil, formula: selectionReference()); gridSelectionChanged(grid) } catch { NSSound.beep() }
@@ -681,7 +700,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     // MARK: - Formatting actions
 
     @objc func formatPainter(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         grid.book.copyStyles(sheet: grid.sheet, grid.selection)
         grid.formatPainterArmed = true
         window?.makeFirstResponder(grid)
@@ -729,7 +748,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     @objc private func percentAction(_ sender: Any?) { grid.setStyle("num_fmt", "0%") }
     @objc private func thousandsAction(_ sender: Any?) { grid.setStyle("num_fmt", "#,##0.00") }
     @objc func formatCells(_ sender: Any?) {
-        grid.commitEditing(move: nil)
+        guard grid.commitIfEditing() else { return }
         let vc = FormatCellsController(book: grid.book, sheet: grid.sheet, cell: grid.active) { [weak self] code in
             self?.grid.setStyle("num_fmt", code)
         }
@@ -852,6 +871,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     }
 
     func windowDidBecomeKey(_ notification: Notification) { syncZoom() }
+    func windowWillClose(_ notification: Notification) { grid?.hidePopups() }
 
     // Test hooks (scripts/ui_tests.sh)
     func focusFormulaBarForTesting() { window?.makeFirstResponder(formulaField) }
@@ -860,7 +880,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         window?.makeFirstResponder(nameBox)
         if let tv = nameBox.currentEditor() as? NSTextView { _ = control(nameBox, textView: tv, doCommandBy: #selector(NSResponder.insertNewline(_:))) }
     }
-    func selectSheetForTesting(_ i: Int) { switchTo(sheet: i) }
+    func selectSheetForTesting(_ i: Int) { switchToSheet(i) }
 }
 
 

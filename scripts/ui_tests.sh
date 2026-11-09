@@ -62,4 +62,16 @@ run "chart save + reopen" "$CHART_DATA;; chart pie A1:B3;; chart line A1:C3;; ch
 run "comments" "comment B2 Nota di prova;; key cmd+shift+n;; tab 0;; state" "editing=false"
 run "validation list" "validlist A1:A5 Sì;No;Forse;; select A2;; listitems;; checkvalid A3 Boh;; checkvalid A3 no" "VALID ok" "ITEMS Sì,No,Forse" "CHECK 1" "CHECK 0"
 run "summarize" "input A1=Cliente;; input B1=Importo;; input A2=Rossi;; input B2=10;; input A3=Bianchi;; input B3=5;; input A4=Rossi;; input B4=7;; select A1;; summarize A1:B4 A B 0;; sheets;; print B3" "current=1" "CELL B3 = 17"
+# Review fixes
+run "summarize right of the data" "input A1=x;; input A2=1;; select D1:E5;; dialog summarize;; state" "editing=false"
+run "validation alert blocks sheet switch" "key cmd+shift+n;; tab 0;; validlist A1:A5 Sì;No;; click A1;; type Boh;; key return;; tab 1;; sheets" "SHEETS Foglio1,Foglio2 current=0"
+run "validation warning + fill selection" "validwarn A1:A3 Sì;No;; select A1:A3;; type Boh;; key cmd+return;; alertbutton 1;; print A3" "CELL A3 = Boh | Boh"
+run "validation alert cancels commands" "validlist A1:A5 Sì;No;; input A2=x;; click A1;; type Boh;; key return;; insertrows;; alertbutton 1;; print A2;; state" "CELL A2 = x | x" "editing=true"
+run "validation list picks the value" "input J1=1234,5;; input J2==1/3;; validlist A1 =\$J\$1:\$J\$2;; select A1;; pick 1;; print A1" "| 0,333333333333333"
+run "move keeps the clipboard" "input B1=3;; input A1==B1*2;; click A1;; key cmd+c;; input C3=x;; select C3;; dragborder C3 D6;; select C9;; shiftcells insert down;; click E1;; key cmd+v;; print E1;; print D6" "| =F1*2" "CELL D6 = x | x"
+run "delete cells is one undo step" "input B2=a;; input B3=b;; select B2;; bold;; select B2;; shiftcells delete down;; key cmd+z;; print B2;; print B3;; styleof B2" "CELL B2 = a | a" "CELL B3 = b | b" "STYLE B2 bold=true"
+run "tiled paste is one undo step" "input A1=5;; click A1;; key cmd+c;; select C1:C4;; key cmd+v;; key cmd+z;; print C1;; print C4" "CELL C1 =  |" "CELL C4 =  |"
+run "sort keeps links" "input A1=b;; input A2=a;; link A1 https://b.example;; sortkeys A1:A2 A+;; linkof A2;; linkof A1" "LINK A2 https://b.example" "LINK A1 -"
+run "tab run ends on arrows" "click B2;; type 1;; key tab;; key down;; type 2;; key return;; state" "active=C4"
+run "internal link with quoted sheet" "key cmd+shift+n;; tab 0;; input A1=x;; followlink #'Foglio2'!C5;; sheets;; state" "current=1" "active=C5"
 exit $fail

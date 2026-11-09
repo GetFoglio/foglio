@@ -42,6 +42,12 @@ extension Workbook {
               let d = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] else { return nil }
         return d
     }
+    /// List items with what to enter when one is picked (the source value as typed, not its formatted text).
+    func validationListItems(sheet: Int, row: Int, col: Int) -> [(display: String, input: String)]? {
+        guard let s = Workbook.take(foglio_validation_list_items(rawPtr, UInt32(sheet), Int32(row + 1), Int32(col + 1))),
+              let a = (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [[String: Any]] else { return nil }
+        return a.map { (($0["display"] as? String) ?? "", ($0["input"] as? String) ?? "") }
+    }
     func validationList(sheet: Int, row: Int, col: Int) -> [String]? {
         guard let s = Workbook.take(foglio_validation_list(rawPtr, UInt32(sheet), Int32(row + 1), Int32(col + 1))) else { return nil }
         return (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String]
@@ -72,6 +78,58 @@ extension Workbook {
     func removeLink(sheet: Int, row: Int, col: Int) {
         _ = foglio_link_remove(rawPtr, UInt32(sheet), Int32(row + 1), Int32(col + 1))
         notifyChanged()
+    }
+
+    // MARK: undo groups, moving ranges
+    /// Everything `body` changes is one undo step.
+    func grouped<T>(_ body: () -> T) -> T {
+        foglio_begin_group(rawPtr)
+        defer { foglio_end_group(rawPtr) }
+        return body()
+    }
+    /// Moves (or copies) `src` so its top-left corner lands on `to`, keeping the user's internal clipboard.
+    @discardableResult
+    func moveRange(sheet: Int, _ src: GridRange, to: CellRef, copy: Bool = false) -> Bool {
+        let rc = foglio_move_range(rawPtr, UInt32(sheet), Int32(src.r0 + 1), Int32(src.c0 + 1), Int32(src.r1 + 1), Int32(src.c1 + 1), Int32(to.row + 1), Int32(to.col + 1), !copy)
+        notifyChanged()
+        return rc == 0
+    }
+
+    // MARK: names and references
+    /// "Sheet!A1:B5", "'O''Brien'!$A$1", "A1" or a defined name → (sheet index, range). nil if not a plain range.
+    func resolveReference(_ text: String, currentSheet: Int) -> (sheet: Int, range: GridRange)? {
+        var f = text.trimmingCharacters(in: CharacterSet(charactersIn: "= "))
+        guard !f.isEmpty else { return nil }
+        var sheetIndex = currentSheet
+        if let bang = f.lastIndex(of: "!") {
+            var sname = String(f[..<bang]).trimmingCharacters(in: .whitespaces)
+            if sname.hasPrefix("'") && sname.hasSuffix("'") && sname.count >= 2 {
+                sname = String(sname.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
+            }
+            guard let i = sheetNames.firstIndex(of: sname) ?? sheetNames.firstIndex(where: { $0.caseInsensitiveCompare(sname) == .orderedSame })
+            else { return nil }
+            sheetIndex = i
+            f = String(f[f.index(after: bang)...])
+        }
+        if let r = FormulaText.gridRange(f.replacingOccurrences(of: "$", with: "").uppercased()) { return (sheetIndex, r) }
+        return nil
+    }
+    /// A defined name that refers to a plain range (sheet-scoped names of the current sheet first).
+    func resolveName(_ name: String, currentSheet: Int) -> (sheet: Int, range: GridRange)? {
+        let matches = definedNames.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame && ($0.scope == nil || $0.scope == currentSheet) }
+        guard let n = matches.first(where: { $0.scope != nil }) ?? matches.first else { return nil }
+        return resolveReference(n.formula, currentSheet: currentSheet)
+    }
+    func nameExists(_ name: String) -> Bool { definedNames.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
+
+    /// A typed link address made openable: "a@b.it" → mailto:, "example.com" / "host:8080/x" → https://.
+    static func normalizedLinkAddress(_ address: String) -> String {
+        let a = address.trimmingCharacters(in: .whitespaces)
+        guard !a.isEmpty, !a.hasPrefix("#") else { return a }
+        // A real scheme ("https:", "mailto:") is letters followed by ':' that is not a port number.
+        let hasScheme = a.range(of: "^[A-Za-z][A-Za-z0-9+.-]*:(?!\\d+(/|$|\\?|#))", options: .regularExpression) != nil
+        if hasScheme { return a }
+        return a.contains("@") && !a.contains("/") ? "mailto:" + a : "https://" + a
     }
 
     // MARK: summary ("pivot-lite")
