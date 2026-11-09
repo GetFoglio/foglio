@@ -116,6 +116,16 @@ fn update_style(old_value: &Style, style_path: &str, value: &str) -> Result<Styl
         "font.color" => {
             style.font.color = Color::from_param(value)?;
         }
+        // Foglio fork: font name. A named font is not a theme font: without
+        // `scheme = none` Excel would show the theme font instead.
+        "font.name" => {
+            let name = value.trim();
+            if name.is_empty() || name.chars().count() > 31 {
+                return Err(format!("Invalid font name: '{value}'."));
+            }
+            style.font.name = name.to_string();
+            style.font.scheme = crate::types::FontScheme::None;
+        }
         "font.size" => {
             let new_size: i32 = value
                 .parse()
@@ -213,7 +223,7 @@ fn update_style(old_value: &Style, style_path: &str, value: &str) -> Result<Styl
 /// ```
 pub struct UserModel<'a> {
     pub(crate) model: Model<'a>,
-    history: History,
+    pub(super) history: History, // Foglio fork: pub(super) for history groups
     send_queue: Vec<QueueDiffs>,
     pause_evaluation: bool,
     /// Foglio fork: true while an operation whose changes have been reported
@@ -1131,9 +1141,11 @@ impl<'a> UserModel<'a> {
     /// See also [`Model::insert_rows`].
     pub fn insert_rows(&mut self, sheet: u32, row: i32, row_count: i32) -> Result<(), String> {
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model.insert_rows(sheet, row, row_count)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.push(Diff::InsertRows {
             sheet,
             row,
@@ -1163,9 +1175,11 @@ impl<'a> UserModel<'a> {
         column_count: i32,
     ) -> Result<(), String> {
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model.insert_columns(sheet, column, column_count)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.push(Diff::InsertColumns {
             sheet,
             column,
@@ -1228,9 +1242,11 @@ impl<'a> UserModel<'a> {
         })?;
 
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model.delete_rows(sheet, row, row_count)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.extend(link_diffs);
         diff_list.push(Diff::DeleteRows {
             sheet,
@@ -1308,9 +1324,11 @@ impl<'a> UserModel<'a> {
         })?;
 
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model.delete_columns(sheet, column, column_count)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.extend(link_diffs);
         diff_list.push(Diff::DeleteColumns {
             sheet,
@@ -1352,10 +1370,12 @@ impl<'a> UserModel<'a> {
         }
 
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model
             .move_columns_action(sheet, column, column_count, new_delta)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.push(Diff::MoveColumns {
             sheet,
             column,
@@ -1395,10 +1415,12 @@ impl<'a> UserModel<'a> {
         }
 
         let old_merged_cells = self.model.get_merged_cells(sheet)?.to_vec();
+        let old_annotations = self.annotations_snapshot(); // Foglio fork: comments, data validation
         self.model
             .move_rows_action(sheet, row, row_count, new_delta)?;
 
         let mut diff_list = self.merged_cells_snapshot_diffs(sheet, old_merged_cells)?;
+        diff_list.extend(self.annotations_snapshot_diffs(old_annotations)); // Foglio fork
         diff_list.push(Diff::MoveRows {
             sheet,
             row,
@@ -2424,6 +2446,7 @@ impl<'a> UserModel<'a> {
                 | Diff::DeleteNamedStyle { .. }
                 | Diff::UpdateNamedStyle { .. }
                 | Diff::SetCellLink { .. }
+                | Diff::SetSheetAnnotations { .. } // Foglio fork: comments, data validation
                 | Diff::SetWorkbookName { .. } => {}
                 _ => {
                     simple = false;

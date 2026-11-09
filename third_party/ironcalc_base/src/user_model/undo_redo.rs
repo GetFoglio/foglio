@@ -641,6 +641,10 @@ impl<'a> UserModel<'a> {
                     needs_evaluation = true;
                     self.model.workbook.worksheet_mut(*sheet)?.merged_cells = old_value.clone();
                 }
+                // Foglio fork: comments, data validation
+                Diff::SetSheetAnnotations {
+                    sheet, old_value, ..
+                } => self.install_annotations(*sheet, old_value)?,
             }
         }
         if needs_evaluation {
@@ -1092,6 +1096,10 @@ impl<'a> UserModel<'a> {
                     needs_evaluation = true;
                     self.model.workbook.worksheet_mut(*sheet)?.merged_cells = new_value.clone();
                 }
+                // Foglio fork: comments, data validation
+                Diff::SetSheetAnnotations {
+                    sheet, new_value, ..
+                } => self.install_annotations(*sheet, new_value)?,
             }
         }
 

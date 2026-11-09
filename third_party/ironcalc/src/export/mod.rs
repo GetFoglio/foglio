@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod _rels;
+mod annotations; // Foglio fork: comments, data validation, tab colour
 mod conditional_formatting;
 mod doc_props;
 mod dxfs_styles;
@@ -49,6 +50,7 @@ fn get_content_types_xml(workbook: &Workbook) -> String {
     content.push(
         r#"<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>"#.to_string(),
     );
+    content.extend(annotations::content_types(workbook)); // Foglio fork: comments
     content.extend([
         r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#.to_string(),
         r#"<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>"#.to_string(),
@@ -125,7 +127,9 @@ pub fn save_xlsx_to_writer<W: Write + Seek>(model: &Model, writer: W) -> Result<
     // sheet rels parts (one per sheet with external hyperlinks)
     let mut has_worksheet_rels = false;
     for (sheet_index, worksheet) in workbook.worksheets.iter().enumerate() {
-        if let Some(rels_xml) = worksheets::get_worksheet_xml_rels(worksheet) {
+        let rels = worksheets::get_worksheet_xml_rels(worksheet);
+        let rels = annotations::merge_sheet_rels(rels, sheet_index, worksheet); // Foglio fork: comments
+        if let Some(rels_xml) = rels {
             if !has_worksheet_rels {
                 zip.add_directory("xl/worksheets/_rels", options)?;
                 has_worksheet_rels = true;
@@ -161,6 +165,8 @@ pub fn save_xlsx_to_writer<W: Write + Seek>(model: &Model, writer: W) -> Result<
             .as_bytes(),
         )?;
     }
+
+    annotations::write_parts(&mut zip, model, options)?; // Foglio fork: comments
 
     let writer = zip.finish()?;
     Ok(writer)

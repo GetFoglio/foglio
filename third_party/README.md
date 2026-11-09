@@ -117,6 +117,48 @@ resolving to these copies. Every Foglio change is marked with a
   numbers (Excel cached -1.9999999999999998 in
   `ironcalc/tests/calc_tests/MATH_AND_TRIGONOMETRY/POWER.xlsx`).
 
+### Comments, data validation, font name, tab colour
+* **Data validation** (new `ironcalc_base/src/data_validation.rs`, field
+  `Worksheet::data_validations`): rules with sqref, type (any, whole, decimal,
+  list, date, time, textLength, custom), operator, formula1/formula2 (stored
+  as in xlsx: English, no `=`), allowBlank, in-cell dropdown, input message,
+  error style/title/message. `Model`: get/add/remove rules by area (rules are
+  split around a cleared rectangle, formulas rebased to the new first cell),
+  list items of a cell (inline items or the formatted values of the
+  referenced range, evaluated per cell), `validate_input` (reads the input as
+  `set_user_input` would; custom formulas are evaluated with the candidate
+  temporarily in the cell), conversion of formulas from/to what the user types
+  in the workbook language and locale, `english_formula_to_user`.
+* **Comments**: `Model::get/set/delete_comment`, `get_comment_cells`.
+* Both follow inserted/deleted/moved rows and columns (hook at the top of
+  `actions.rs::displace_cf_ranges`; deleted cells lose their comment, ranges
+  are clipped, formulas of every sheet's rules displaced); sheet renames
+  rewrite rule formulas (`new_empty.rs::rename_sheet`).
+* **Undo** (new `user_model/annotations.rs`): `Diff::SetSheetAnnotations`
+  (comments + rules of a sheet, old/new); the structural actions in
+  `user_model/common.rs` push it as a snapshot (old == new) like
+  `SetMergedCells`, so undo restores deleted comments/rules exactly.
+  `UserModel::set_comment`, `delete_comment`, `set_data_validation`,
+  `clear_data_validation`, `get_data_validation_list`, `validate_input`,
+  `data_validation_from_user` / `to_user`.
+* **History groups**: `UserModel::begin_history_group` /
+  `end_history_group` merge everything pushed in between into one undo step
+  (`History::group`; `UserModel::history` is `pub(super)`).
+* **Font name**: style path `font.name` (`update_range_style`); sets the font
+  scheme to `none`, otherwise Excel shows the theme font.
+* **xlsx import** (new `ironcalc/src/import/annotations.rs`): comments parts
+  at any target (`../comments1.xml`, openpyxl's absolute
+  `/xl/comments/comment1.xml`; upstream failed to open those files), authors,
+  Excel's bold "Author:" first run is not part of the text, a broken comments
+  part is skipped; `<dataValidations>` and the x14 `<x14:dataValidations>`
+  extension (cross-sheet lists from older Excel).
+* **xlsx export** (new `ironcalc/src/export/annotations.rs`): comments as
+  Excel writes notes (`xl/commentsN.xml`, `xl/drawings/vmlDrawingN.vml`,
+  `<legacyDrawing>`, sheet rels with ids `rIdFoglioComments1`/`rIdFoglioVml1`,
+  content types), `<dataValidations>` (titles/messages truncated to Excel's
+  32/255 limits, rules without their formulas skipped), `<sheetPr><tabColor>`
+  (upstream imported the tab colour but did not write it).
+
 ### Tests added
 * `ironcalc_base/src/test/test_incremental.rs`: targeted tests, randomized
   edit sequences (400 sessions × 60 edits in the default run; 2000 × 120 in
@@ -128,6 +170,9 @@ resolving to these copies. Every Foglio change is marked with a
 * `ironcalc/tests/incremental_corpus.rs`: random edits on every workbook of
   upstream's Excel-made xlsx corpus (242 workbooks), in check mode.
 * `number_format::tests::excel_string`.
+* `data_validation::tests` (rectangles, displacement + undo, history groups),
+  `import::annotations::tests`; Foglio's `core/tests/features.rs` covers the
+  C ABI with xlsx round trips and an openpyxl-made workbook.
 
 Known upstream test failures (also failing on the pristine 0.9.1 package):
 `test::user_model::test_to_from_bytes::errors` (bitcode error text) and six

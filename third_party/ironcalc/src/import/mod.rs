@@ -1,3 +1,4 @@
+mod annotations; // Foglio fork: comments, data validation
 mod conditional_formatting;
 mod metadata;
 pub(crate) mod shared_strings;

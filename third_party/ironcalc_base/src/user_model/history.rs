@@ -315,6 +315,14 @@ pub(crate) enum Diff {
         old_value: Vec<MergedCell>,
         new_value: Vec<MergedCell>,
     },
+    /// Foglio fork: sets the comments and data validation rules of a sheet
+    /// (see user_model/annotations.rs). Like `SetMergedCells`, structural
+    /// actions push it with `old_value == new_value` so that undo restores them.
+    SetSheetAnnotations {
+        sheet: u32,
+        old_value: Box<super::annotations::SheetAnnotations>,
+        new_value: Box<super::annotations::SheetAnnotations>,
+    },
 }
 
 pub(crate) type DiffList = Vec<Diff>;
@@ -323,10 +331,18 @@ pub(crate) type DiffList = Vec<Diff>;
 pub(crate) struct History {
     pub(crate) undo_stack: Vec<DiffList>,
     pub(crate) redo_stack: Vec<DiffList>,
+    /// Foglio fork: while a group is open (depth > 0) pushed lists are merged
+    /// into one undo step (see `UserModel::begin_history_group`).
+    pub(crate) group: Option<(u32, DiffList)>,
 }
 
 impl History {
     pub fn push(&mut self, diff_list: DiffList) {
+        if let Some((_, group)) = self.group.as_mut() {
+            group.extend(diff_list);
+            self.redo_stack = vec![];
+            return;
+        }
         self.undo_stack.push(diff_list);
         self.redo_stack = vec![];
     }

@@ -670,10 +670,15 @@ pub(crate) fn get_worksheet_xml(
         get_conditional_formatting_xml(&worksheet.conditional_formatting);
 
     let hyperlinks_section = get_hyperlinks_section(worksheet);
+    // Foglio fork: tab colour, data validation, comments (see annotations.rs)
+    let sheet_pr = crate::export::annotations::sheet_pr_element(worksheet);
+    let data_validations_section = crate::export::annotations::data_validations_element(worksheet);
+    let legacy_drawing_section = crate::export::annotations::legacy_drawing_element(worksheet);
 
     format!(
         "{XML_DECLARATION}\
 <worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
+  {sheet_pr}\
   <dimension ref=\"{dimension}\"/>\
   <sheetViews>\
     <sheetView workbookViewId=\"0\"{show_grid_lines}{tab_selected}>\
@@ -686,7 +691,9 @@ pub(crate) fn get_worksheet_xml(
   </sheetData>\
   {merge_cells_section}\
   {cf_sections}\
+  {data_validations_section}\
   {hyperlinks_section}\
+  {legacy_drawing_section}\
   {cf_ext_lst}\
 </worksheet>"
     )

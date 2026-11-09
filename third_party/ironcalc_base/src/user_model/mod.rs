@@ -1,5 +1,6 @@
 #![deny(missing_docs)]
 
+mod annotations; // Foglio fork: comments, data validation, history groups
 mod autofill;
 mod border;
 mod border_utils;

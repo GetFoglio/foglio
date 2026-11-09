@@ -56,6 +56,7 @@ impl<'a> Model<'a> {
             show_grid_lines: true,
             conditional_formatting: vec![],
             links: HashMap::new(),
+            data_validations: vec![], // Foglio fork: data validation
         }
     }
 
@@ -505,6 +506,7 @@ impl<'a> Model<'a> {
         }
         self.workbook.defined_names = defined_names;
 
+        self.rename_sheet_in_data_validations(sheet_index, new_name); // Foglio fork
         // Update the name of the worksheet
         self.workbook.worksheet_mut(sheet_index)?.set_name(new_name);
         self.reset_parsed_structures();

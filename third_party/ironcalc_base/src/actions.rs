@@ -406,6 +406,7 @@ impl<'a> Model<'a> {
 
     /// Updates the `range` field and formula fields of every CF rule on `sheet` according to `displace_data`.
     fn displace_cf_ranges(&mut self, sheet: u32, displace_data: &DisplaceData) {
+        self.displace_annotations(sheet, displace_data); // Foglio fork: comments, data validation
         let count = match self.workbook.worksheets.get(sheet as usize) {
             Some(ws) => ws.conditional_formatting.len(),
             None => return,

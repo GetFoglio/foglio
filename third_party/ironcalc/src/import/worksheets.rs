@@ -335,41 +335,6 @@ fn load_sheet_color(ws: &XmlNode, theme: &Theme) -> Result<Color, XlsxError> {
     Ok(color)
 }
 
-fn load_comments<R: Read + std::io::Seek>(
-    archive: &mut zip::read::ZipArchive<R>,
-    path: &str,
-) -> Result<Vec<Comment>, XlsxError> {
-    let mut comments = Vec::new();
-    let file = archive.by_name(path)?;
-    let doc = XmlNode::parse(BufReader::new(file))?;
-    let ws = &doc;
-    let comment_list = ws
-        .children()
-        .filter(|n| n.has_tag_name("commentList"))
-        .collect::<Vec<&XmlNode>>();
-    if comment_list.len() == 1 {
-        for comment in comment_list[0].children() {
-            let text = comment
-                .descendants()
-                .filter(|n| n.has_tag_name("t"))
-                .map(|n| n.text().unwrap().to_string())
-                .collect::<Vec<String>>()
-                .join("");
-            let cell_ref = get_attribute(comment, "ref")?.to_string();
-            // TODO: Read author_name from the list of authors
-            let author_name = "".to_string();
-            comments.push(Comment {
-                text,
-                author_name,
-                author_id: None,
-                cell_ref,
-            });
-        }
-    }
-
-    Ok(comments)
-}
-
 #[derive(Error, Debug, PartialEq)]
 enum ParseReferenceError {
     #[error("RowError: {0}")]
@@ -703,10 +668,11 @@ fn load_sheet_rels<R: Read + std::io::Seek>(
     for rel in rels {
         let t = get_attribute(rel, "Type")?.to_string();
         if t.ends_with("comments") {
-            let mut target = get_attribute(rel, "Target")?.to_string();
-            // Target="../comments1.xlsx"
-            target.replace_range(..2, v[0]);
-            comments = load_comments(archive, &target)?;
+            // Foglio fork: any form of target, authors; a broken part is skipped
+            let target = get_attribute(rel, "Target")?;
+            let sheet_path = format!("{}/worksheets/{}", v[0], v[1]);
+            let target = super::annotations::resolve_target(&sheet_path, target);
+            comments = super::annotations::load_comments(archive, &target);
         } else if t.ends_with("hyperlink") {
             let id = get_attribute(rel, "Id")?.to_string();
             let target = get_attribute(rel, "Target")?.to_string();
@@ -989,6 +955,7 @@ pub(super) fn load_sheet<R: Read + std::io::Seek>(
         show_grid_lines: sheet_view.show_grid_lines,
         conditional_formatting,
         links,
+        data_validations: super::annotations::load_data_validations(ws), // Foglio fork
     })
 }
 
