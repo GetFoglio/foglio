@@ -121,12 +121,15 @@ impl<'a> Model<'a> {
                 }
                 error @ CalcResult::Error { .. } => return error,
                 CalcResult::EmptyArg => result = Some(result.unwrap_or(false)),
-                // Strings are ignored unless they are "TRUE" or "FALSE" (case insensitive). EXCEPT if the string value
-                // comes from a reference, in which case it is always ignored regardless of its value.
-                CalcResult::String(..) => {
-                    if !matches!(arg, Node::ReferenceKind { .. }) {
-                        if let Ok(f) = self.get_boolean(arg, cell) {
-                            result = Some(fold_fn(result, f));
+                // A string given directly must be "TRUE" or "FALSE" (case insensitive); other
+                // text is #VALUE! as in Excel (Foglio fork: upstream ignored it; the empty string
+                // is still ignored, as upstream's tests require). A string that comes from a
+                // reference is always ignored regardless of its value.
+                CalcResult::String(text) => {
+                    if !text.is_empty() && !matches!(arg, Node::ReferenceKind { .. }) {
+                        match self.get_boolean(arg, cell) {
+                            Ok(f) => result = Some(fold_fn(result, f)),
+                            Err(error) => return error,
                         }
                     }
                 }

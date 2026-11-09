@@ -140,8 +140,17 @@ fn seconds_of_day(v: f64) -> i64 {
 
 // Generate DAY / MONTH / YEAR helpers – simply convert the serial number to a
 // NaiveDate and return the requested component as a number.
+/// YEAR, MONTH or DAY of Excel's serial 60, 1900-02-29.
+fn excel_feb_29_1900(part: &str) -> f64 {
+    match part {
+        "year" => 1900.0,
+        "month" => 2.0,
+        _ => 29.0,
+    }
+}
+
 macro_rules! date_part_fn {
-    ($name:ident, $method:ident) => {
+    ($name:ident, $method:ident, $at_zero:expr) => {
         pub(crate) fn $name(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
             if args.len() != 1 {
                 return CalcResult::new_args_number_error(cell);
@@ -152,9 +161,23 @@ macro_rules! date_part_fn {
             self.apply_number_unary(
                 &args[0],
                 cell,
-                |f| match from_excel_date(f.floor() as i64) {
-                    Ok(date) => Ok(date.$method() as f64),
-                    Err(_) => Err(Error::NUM),
+                |f| {
+                    // Foglio fork: Excel's calendar before 1900-03-01. Serial 0
+                    // (an empty cell, FALSE) is 1900-01-00, serial 1 is
+                    // 1900-01-01 and serial 60 the 1900-02-29 that Excel
+                    // believes in. Upstream shifted these by a day.
+                    let serial = f.floor();
+                    if serial == 0.0 {
+                        return Ok($at_zero);
+                    }
+                    if serial == 60.0 {
+                        return Ok(excel_feb_29_1900(stringify!($method)));
+                    }
+                    let shift = if (1.0..60.0).contains(&serial) { 1 } else { 0 };
+                    match from_excel_date(serial as i64 + shift) {
+                        Ok(date) => Ok(date.$method() as f64),
+                        Err(_) => Err(Error::NUM),
+                    }
                 },
             )
         }
@@ -738,9 +761,9 @@ impl<'a> Model<'a> {
     // -----------------------------------------------------------------------
     // Auto-generated DATE part helpers (DAY / MONTH / YEAR)
     // -----------------------------------------------------------------------
-    date_part_fn!(fn_day, day);
-    date_part_fn!(fn_month, month);
-    date_part_fn!(fn_year, year);
+    date_part_fn!(fn_day, day, 0.0);
+    date_part_fn!(fn_month, month, 1.0);
+    date_part_fn!(fn_year, year, 1900.0);
 
     pub(crate) fn fn_eomonth(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let args_count = args.len();

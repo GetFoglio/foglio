@@ -5,6 +5,7 @@ use crate::{
         token::Error,
         types::CellReferenceIndex,
     },
+    functions::util::arg_given,
     model::Model,
 };
 
@@ -34,9 +35,14 @@ impl<'a> Model<'a> {
         let num_rows = data.len();
         let num_cols = data[0].len();
 
-        let rows_arg = match self.get_number(&args[1], cell) {
-            Ok(n) => n as i64,
-            Err(e) => return e,
+        // Foglio fork: an omitted `rows` (`TAKE(r,,1)`) takes every row.
+        let rows_arg = if arg_given(args, 1) {
+            match self.get_number(&args[1], cell) {
+                Ok(n) => n as i64,
+                Err(e) => return e,
+            }
+        } else {
+            num_rows as i64
         };
         if rows_arg == 0 {
             return CalcResult::new_error(Error::CALC, cell, "rows cannot be 0".to_string());
@@ -50,7 +56,7 @@ impl<'a> Model<'a> {
             (num_rows - take)..num_rows
         };
 
-        let col_range = if args.len() == 3 {
+        let col_range = if arg_given(args, 2) {
             let cols_arg = match self.get_number(&args[2], cell) {
                 Ok(n) => n as i64,
                 Err(e) => return e,
@@ -101,9 +107,14 @@ impl<'a> Model<'a> {
         let num_rows = data.len();
         let num_cols = data[0].len();
 
-        let rows_arg = match self.get_number(&args[1], cell) {
-            Ok(n) => n as i64,
-            Err(e) => return e,
+        // Foglio fork: an omitted `rows` (`DROP(r,,1)`) drops no row.
+        let rows_arg = if arg_given(args, 1) {
+            match self.get_number(&args[1], cell) {
+                Ok(n) => n as i64,
+                Err(e) => return e,
+            }
+        } else {
+            0
         };
 
         let row_range = if rows_arg >= 0 {
@@ -114,7 +125,7 @@ impl<'a> Model<'a> {
             0..(num_rows - drop)
         };
 
-        let col_range = if args.len() == 3 {
+        let col_range = if arg_given(args, 2) {
             let cols_arg = match self.get_number(&args[2], cell) {
                 Ok(n) => n as i64,
                 Err(e) => return e,

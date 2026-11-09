@@ -206,7 +206,7 @@ impl<'a> Model<'a> {
         let num_rows = data.len();
         let num_cols = data[0].len();
 
-        let sort_index: usize = if args.len() >= 2 {
+        let sort_index: usize = if super::util::arg_given(args, 1) {
             match self.get_number(&args[1], cell) {
                 Ok(n) => {
                     let n = n as i64;
@@ -225,7 +225,7 @@ impl<'a> Model<'a> {
             1
         };
 
-        let ascending: bool = if args.len() >= 3 {
+        let ascending: bool = if super::util::arg_given(args, 2) {
             match self.get_number(&args[2], cell) {
                 Ok(n) => match n as i32 {
                     1 => true,
@@ -244,7 +244,7 @@ impl<'a> Model<'a> {
             true
         };
 
-        let by_col: bool = if args.len() >= 4 {
+        let by_col: bool = if super::util::arg_given(args, 3) {
             match self.get_boolean(&args[3], cell) {
                 Ok(b) => b,
                 Err(e) => return e,

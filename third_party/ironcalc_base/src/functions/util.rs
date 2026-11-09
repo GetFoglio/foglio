@@ -24,6 +24,12 @@ fn parse_date_criterion(s: &str, locale: &Locale) -> Option<f64> {
         .map(|(serial, _)| serial as f64)
 }
 
+/// Foglio fork: whether optional argument `index` was given. An argument
+/// left empty (`SORT(A1:A9,,-1)`) counts as not given, as in Excel.
+pub(crate) fn arg_given(args: &[crate::expressions::parser::Node], index: usize) -> bool {
+    index < args.len() && !matches!(args[index], crate::expressions::parser::Node::EmptyArgKind)
+}
+
 fn error_sort_rank(e: &Error) -> u8 {
     match e {
         Error::NULL => 1,
@@ -68,6 +74,18 @@ pub(crate) fn values_are_equal(left: &CalcResult, right: &CalcResult) -> bool {
 pub(crate) fn compare_values(left: &CalcResult, right: &CalcResult) -> i32 {
     match (left, right) {
         (CalcResult::Number(value1), CalcResult::Number(value2)) => {
+            // Foglio fork: fast paths, same result as the rounding below.
+            // Rounding to 15 significant digits is monotonic and moves a
+            // number by less than 5e-15 of its magnitude, so two numbers more
+            // than 1e-12 (relative) and 1e-15 (absolute) apart stay in the
+            // same order and more than f64::EPSILON apart after rounding.
+            if value1 == value2 {
+                return 0;
+            }
+            let difference = (value1 - value2).abs();
+            if difference > 1e-15 && difference > 1e-12 * value1.abs().max(value2.abs()) {
+                return if value1 < value2 { -1 } else { 1 };
+            }
             let value1 = to_excel_precision(*value1, 15);
             let value2 = to_excel_precision(*value2, 15);
             if (value2 - value1).abs() < f64::EPSILON {

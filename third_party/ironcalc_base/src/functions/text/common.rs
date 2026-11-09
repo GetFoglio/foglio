@@ -10,7 +10,7 @@ use crate::{
     formatter::format::{format_number, parse_formatted_number},
     functions::{
         text::util::{substitute, text_after, text_before, Case},
-        util::from_wildcard_to_regex,
+        util::{arg_given, from_wildcard_to_regex},
     },
     model::Model,
     number_format::to_precision,
@@ -796,7 +796,7 @@ impl<'a> Model<'a> {
             Ok(s) => s,
             Err(error) => return error,
         };
-        let instance_num = if arg_count > 2 {
+        let instance_num = if arg_given(args, 2) {
             match self.get_number(&args[2], cell) {
                 Ok(f) => f.floor() as i32,
                 Err(s) => return s,
@@ -804,7 +804,7 @@ impl<'a> Model<'a> {
         } else {
             1
         };
-        let match_mode = if arg_count > 3 {
+        let match_mode = if arg_given(args, 3) {
             match self.get_number(&args[3], cell) {
                 Ok(f) => {
                     if f == 0.0 {
@@ -819,7 +819,7 @@ impl<'a> Model<'a> {
             Case::Sensitive
         };
 
-        let match_end = if arg_count > 4 {
+        let match_end = if arg_given(args, 4) {
             match self.get_number(&args[4], cell) {
                 Ok(f) => f,
                 Err(s) => return s,
@@ -871,7 +871,7 @@ impl<'a> Model<'a> {
                         return CalcResult::String(text);
                     }
                 }
-                if arg_count == 6 {
+                if arg_given(args, 5) {
                     // An empty cell is converted to empty string (not 0)
                     match self.evaluate_node_in_context(&args[5], cell) {
                         CalcResult::EmptyCell => CalcResult::String("".to_string()),
@@ -901,7 +901,7 @@ impl<'a> Model<'a> {
             Ok(s) => s,
             Err(error) => return error,
         };
-        let instance_num = if arg_count > 2 {
+        let instance_num = if arg_given(args, 2) {
             match self.get_number(&args[2], cell) {
                 Ok(f) => f.floor() as i32,
                 Err(s) => return s,
@@ -909,7 +909,7 @@ impl<'a> Model<'a> {
         } else {
             1
         };
-        let match_mode = if arg_count > 3 {
+        let match_mode = if arg_given(args, 3) {
             match self.get_number(&args[3], cell) {
                 Ok(f) => {
                     if f == 0.0 {
@@ -924,7 +924,7 @@ impl<'a> Model<'a> {
             Case::Sensitive
         };
 
-        let match_end = if arg_count > 4 {
+        let match_end = if arg_given(args, 4) {
             match self.get_number(&args[4], cell) {
                 Ok(f) => f,
                 Err(s) => return s,
@@ -976,7 +976,7 @@ impl<'a> Model<'a> {
                         return CalcResult::String(text);
                     }
                 }
-                if arg_count == 6 {
+                if arg_given(args, 5) {
                     // An empty cell is converted to empty string (not 0)
                     match self.evaluate_node_in_context(&args[5], cell) {
                         CalcResult::EmptyCell => CalcResult::String("".to_string()),

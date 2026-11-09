@@ -133,9 +133,9 @@ fn test_year_booleans() {
 
     model.evaluate();
 
-    // We start counting from Dec 31, 1899 (serial 1)
-    assert_eq!(model._get_text("A1"), *"1899");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
+    // Foglio fork: like Excel, serial 1 is Jan 1, 1900 and 0 is Jan 0, 1900
+    assert_eq!(model._get_text("A1"), *"1900");
+    assert_eq!(model._get_text("A2"), *"1900");
 }
 
 #[test]
@@ -146,9 +146,9 @@ fn test_month_booleans() {
 
     model.evaluate();
 
-    // We start counting from Dec 31, 1899 (serial 1)
-    assert_eq!(model._get_text("A1"), *"12");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
+    // Foglio fork: like Excel, serial 1 is Jan 1, 1900 and 0 is Jan 0, 1900
+    assert_eq!(model._get_text("A1"), *"1");
+    assert_eq!(model._get_text("A2"), *"1");
 }
 
 #[test]
@@ -159,9 +159,9 @@ fn test_day_booleans() {
 
     model.evaluate();
 
-    // We start counting from Dec 31, 1899 (serial 1)
-    assert_eq!(model._get_text("A1"), *"31");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
+    // Foglio fork: like Excel, serial 1 is Jan 1, 1900 and 0 is Jan 0, 1900
+    assert_eq!(model._get_text("A1"), *"1");
+    assert_eq!(model._get_text("A2"), *"0");
 }
 
 #[test]
@@ -176,9 +176,9 @@ fn test_day_small_serial() {
     model.evaluate();
 
     assert_eq!(model._get_text("A1"), *"#NUM!");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
-    // Excel thinks is Feb 29, 1900
-    assert_eq!(model._get_text("A3"), *"28");
+    // Foglio fork: Excel's Jan 0, 1900 and Feb 29, 1900
+    assert_eq!(model._get_text("A2"), *"0");
+    assert_eq!(model._get_text("A3"), *"29");
 
     // From now on everyone agrees
     assert_eq!(model._get_text("A4"), *"1");
@@ -196,7 +196,8 @@ fn test_month_small_serial() {
     model.evaluate();
 
     assert_eq!(model._get_text("A1"), *"#NUM!");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
+    // Foglio fork: Excel's Jan 0, 1900
+    assert_eq!(model._get_text("A2"), *"1");
     // We agree with Excel here (We are both in Feb)
     assert_eq!(model._get_text("A3"), *"2");
 
@@ -216,7 +217,8 @@ fn test_year_small_serial() {
     model.evaluate();
 
     assert_eq!(model._get_text("A1"), *"#NUM!");
-    assert_eq!(model._get_text("A2"), *"#NUM!");
+    // Foglio fork: Excel's Jan 0, 1900
+    assert_eq!(model._get_text("A2"), *"1900");
 
     assert_eq!(model._get_text("A3"), *"1900");
 

@@ -137,9 +137,93 @@ pub fn to_excel_precision_str(value: f64) -> String {
     to_precision_str(value, 15)
 }
 
+/// The number of significant digits of the shortest decimal that reads back as
+/// `value` (as printed by `ryu`). Trailing zeros of an integer part count, so
+/// this may overestimate, never underestimate.
+fn shortest_significant_digits(value: f64) -> usize {
+    let mut buffer = ryu::Buffer::new();
+    let text = buffer.format_finite(value);
+    let mantissa = match text.find(['e', 'E']) {
+        Some(position) => &text[..position],
+        None => text,
+    };
+    let mantissa = mantissa.strip_suffix(".0").unwrap_or(mantissa);
+    let digits = mantissa
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .skip_while(|d| *d == b'0')
+        .count();
+    digits.max(1)
+}
+
+/// Foglio fork: a number as text, the way Excel turns a number into text
+/// (`=A1&""`, CONCATENATE, LEN, …): at most 15 significant digits, no
+/// trailing zeros, and scientific notation (`1E+20`, `9.5367431640625E-07`)
+/// when the number is too large to show its digits (>= 1E+15) or when fixed
+/// notation would need more than 18 decimals. Excel computed
+/// VALUETOTEXT(7.123456E-09) = "0.000000007123456" in IronCalc's test corpus;
+/// the exact small-number cut-off is an estimate.
+pub fn to_excel_string(value: f64) -> String {
+    if !value.is_finite() {
+        return to_precision_str(value, 15);
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    // d.dddddddddddddde±x, correctly rounded to 15 significant digits
+    let formatted = format!("{:.14e}", value.abs());
+    let (mantissa, exponent) = match formatted.split_once('e') {
+        Some((m, e)) => (m, e.parse::<i32>().unwrap_or(0)),
+        None => (formatted.as_str(), 0),
+    };
+    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let sign = if value < 0.0 { "-" } else { "" };
+    // Fixed notation needs `decimals` digits after the point.
+    let decimals = (digits.len() as i32 - 1 - exponent).max(0);
+    if exponent >= 15 || decimals > 18 {
+        let (first, rest) = digits.split_at(1);
+        let exponent_sign = if exponent < 0 { '-' } else { '+' };
+        let mantissa = if rest.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first}.{rest}")
+        };
+        return format!("{sign}{mantissa}E{exponent_sign}{:02}", exponent.abs());
+    }
+    if exponent < 0 {
+        let zeros = "0".repeat((-exponent - 1) as usize);
+        return format!("{sign}0.{zeros}{digits}");
+    }
+    let integer_digits = exponent as usize + 1;
+    if digits.len() <= integer_digits {
+        let zeros = "0".repeat(integer_digits - digits.len());
+        format!("{sign}{digits}{zeros}")
+    } else {
+        let (integer, fraction) = digits.split_at(integer_digits);
+        format!("{sign}{integer}.{fraction}")
+    }
+}
+
 pub fn to_excel_precision(value: f64, precision: usize) -> f64 {
     if !value.is_finite() {
         return value;
+    }
+    // Foglio fork: fast paths. Rounding to `precision` <= 15 significant
+    // digits leaves a number unchanged when the shortest decimal that reads
+    // back as it has at most that many digits: that decimal is on the grid of
+    // `precision`-digit numbers and within half an ulp of the value, and the
+    // grid is far coarser than an ulp, so it is the nearest grid point. This
+    // avoids the string round trip below for integers and for the numbers
+    // people type.
+    if precision <= 15 {
+        if value == 0.0 || (value.fract() == 0.0 && value.abs() < 1e15 && precision == 15) {
+            return value;
+        }
+        if shortest_significant_digits(value) <= precision {
+            return value;
+        }
     }
 
     let s = format!("{:.*e}", precision.saturating_sub(1), value);
@@ -187,6 +271,26 @@ pub fn format_number(value: f64, format_code: &str, locale: &str) -> Formatted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excel_string() {
+        assert_eq!(to_excel_string(0.1 + 0.2), "0.3");
+        assert_eq!(to_excel_string(1.0 / 3.0), "0.333333333333333");
+        assert_eq!(to_excel_string(1.0 / 30.0), "0.0333333333333333");
+        assert_eq!(to_excel_string(1e20), "1E+20");
+        assert_eq!(to_excel_string(2f64.powi(50)), "1.12589990684262E+15");
+        assert_eq!(to_excel_string(2f64.powi(49)), "562949953421312");
+        assert_eq!(to_excel_string(2f64.powi(-20)), "9.5367431640625E-07");
+        assert_eq!(to_excel_string(0.00001), "0.00001");
+        assert_eq!(to_excel_string(7.123456e-9), "0.000000007123456");
+        assert_eq!(to_excel_string(1e-19), "1E-19");
+        assert_eq!(to_excel_string(-1234.5), "-1234.5");
+        assert_eq!(to_excel_string(100.0), "100");
+        assert_eq!(to_excel_string(-0.0), "0");
+        assert_eq!(to_excel_string(123456789012345.0), "123456789012345");
+        assert_eq!(to_excel_string(45306.0), "45306");
+        assert_eq!(to_excel_string(1.5e-300), "1.5E-300");
+    }
 
     // The default table is indexed by `numFmtId`: `get_num_fmt(id, &[])` must return the
     // ECMA-376 §18.8.30 built-in code for that id.

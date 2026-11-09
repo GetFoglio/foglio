@@ -59,7 +59,126 @@ fn use_group_separator(use_thousands: bool, digit_index: i32, group_sizes: &str)
     false
 }
 
+/// Foglio fork: fraction formats such as `# ?/?`, `# ??/??`, `?/?` and
+/// `# ?/8` (a single section, without literals). `None` for anything else.
+fn format_fraction(value: f64, format: &str) -> Option<String> {
+    if format.contains([';', '"', '\\', '[', '.', ',', '%', 'E', 'e']) || !value.is_finite() {
+        return None;
+    }
+    let is_placeholder = |c: char| matches!(c, '?' | '#' | '0');
+    let (left, right) = format.split_once('/')?;
+    if right.is_empty() || right.contains('/') {
+        return None;
+    }
+    let fixed_denominator = if right.chars().all(|c| c.is_ascii_digit()) {
+        Some(right.parse::<u64>().ok().filter(|d| *d > 0)?)
+    } else if right.chars().all(is_placeholder) {
+        None
+    } else {
+        return None;
+    };
+    let numerator_length = left.chars().rev().take_while(|c| is_placeholder(*c)).count();
+    if numerator_length == 0 {
+        return None;
+    }
+    let numerator_format = &left[left.len() - numerator_length..];
+    let rest = &left[..left.len() - numerator_length];
+    let (integer_format, separator) = if rest.is_empty() {
+        (None, "")
+    } else {
+        let integer = rest.trim_end_matches(' ');
+        if integer.len() == rest.len() || integer.is_empty() || !integer.chars().all(is_placeholder) {
+            return None;
+        }
+        (Some(integer), &rest[integer.len()..])
+    };
+
+    let negative = value < 0.0;
+    let x = value.abs();
+    let (mut integer, fraction) = match integer_format {
+        Some(_) => (x.floor(), x - x.floor()),
+        None => (0.0, x),
+    };
+    let (mut numerator, denominator) = match fixed_denominator {
+        Some(d) => ((fraction * d as f64).round(), d as f64),
+        None => {
+            let max_denominator = 10f64.powi(right.len() as i32) - 1.0;
+            let mut best = (fraction.round(), 1.0, (fraction - fraction.round()).abs());
+            let mut d = 2.0;
+            while d <= max_denominator {
+                let n = (fraction * d).round();
+                let error = (fraction - n / d).abs();
+                if error < best.2 - 1e-12 {
+                    best = (n, d, error);
+                }
+                d += 1.0;
+            }
+            (best.0, best.1)
+        }
+    };
+    if integer_format.is_some() && numerator >= denominator {
+        integer += 1.0;
+        numerator -= denominator;
+    }
+    let pad = |text: String, format: &str, right_align: bool| -> String {
+        let width = format.len();
+        if text.len() >= width {
+            return text;
+        }
+        let filler: String = format
+            .chars()
+            .take(width - text.len())
+            .map(|c| match c {
+                '0' => '0',
+                '?' => ' ',
+                _ => '\0',
+            })
+            .filter(|c| *c != '\0')
+            .collect();
+        if right_align {
+            format!("{filler}{text}")
+        } else {
+            format!("{text}{filler}")
+        }
+    };
+    let sign = if negative && (integer > 0.0 || numerator > 0.0) { "-" } else { "" };
+    let integer_text = match integer_format {
+        Some(f) => {
+            if integer == 0.0 {
+                if numerator == 0.0 {
+                    "0".to_string()
+                } else {
+                    pad(String::new(), f, true)
+                }
+            } else {
+                format!("{integer}")
+            }
+        }
+        None => String::new(),
+    };
+    if integer_format.is_some() && numerator == 0.0 {
+        // Only the integer: the fraction is left blank.
+        let blank = " ".repeat(separator.len() + numerator_format.len() + 1 + right.len());
+        return Some(format!("{sign}{integer_text}{blank}"));
+    }
+    let numerator_text = pad(format!("{numerator}"), numerator_format, true);
+    let denominator_text = match fixed_denominator {
+        Some(d) => format!("{d}"),
+        None => pad(format!("{denominator}"), right, false),
+    };
+    Some(format!(
+        "{sign}{integer_text}{separator}{numerator_text}/{denominator_text}"
+    ))
+}
+
 pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Formatted {
+    if let Some(text) = format_fraction(value_original, format) {
+        return Formatted {
+            text,
+            color: None,
+            error: None,
+        };
+    }
     let mut parser = Parser::new(format);
     parser.parse();
     let parts = parser.parts;
@@ -452,6 +571,8 @@ pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Form
                 } else {
                     // TODO: Implement engineering formatting.
                     let exponent = value_abs.log10().floor();
+                    // Foglio fork: the sign is the exponent's (1.5 is 1.5E+00, not 1.5E-00)
+                    exponent_is_negative = exponent < 0.0;
                     exponent_part = format!("{}", exponent.abs()).chars().collect();
                     value /= 10.0_f64.powf(exponent);
                     value = to_precision(value, 15);
