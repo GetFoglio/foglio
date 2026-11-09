@@ -34,6 +34,7 @@ mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 lipo -create $bins -output $APP/Contents/MacOS/Foglio
 strip -x $APP/Contents/MacOS/Foglio
 cp $ROOT/app/Info.plist $APP/Contents/Info.plist
+[[ -f $ROOT/assets/Foglio.icns ]] && cp $ROOT/assets/Foglio.icns $APP/Contents/Resources/Foglio.icns
 codesign --force --sign - $APP >/dev/null 2>&1
 echo "✓ $APP"
 lipo -info $APP/Contents/MacOS/Foglio
