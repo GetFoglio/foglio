@@ -333,6 +333,10 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "panes":
+                print("GRID \(NSStringFromRect(c.grid.frame)) bounds=\(NSStringFromRect(c.grid.bounds)) clips=\(c.grid.layer?.masksToBounds ?? false)")
+                for v in c.grid.subviews where v is ChartPane { print("PANE \(NSStringFromRect(v.frame)) clips=\(v.clipsToBounds)"); for cv in v.subviews { print("  CHARTVIEW \(NSStringFromRect(cv.frame))") } }
+            case "chartdata": if let i = Int(arg) { let d = c.grid.book.chartData(sheet: c.grid.sheet, index: i); print("CHARTDATA \(i) series=\(d.count) \(d.first.map { "\($0)" }?.prefix(300) ?? "")") }
             case "shiftcells": // shiftcells insert down | delete right …
                 let p = arg.split(separator: " ")
                 if p.count == 2 { c.grid.shiftCells(insert: p[0] == "insert", horizontal: p[1] == "right") }

@@ -91,8 +91,12 @@ final class ChartLayer {
         let scroll = CGRect(x: (g.header.width + g.frozen.width) * z, y: (g.header.height + g.frozen.height) * z,
                             width: max(0, g.visible.width - (g.header.width + g.frozen.width) * z),
                             height: max(0, g.visible.height - (g.header.height + g.frozen.height) * z))
-        if mainPane.frame != main { mainPane.frame = main }
-        if scrollPane.frame != scroll { scrollPane.frame = scroll }
+        // Keep the panes inside the cell area (scroll bars excluded).
+        let sw = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        let limit = CGRect(x: 0, y: 0, width: max(0, grid.bounds.width - sw), height: max(0, grid.bounds.height - sw))
+        let mainR = main.intersection(limit), scrollR = scroll.intersection(limit)
+        if mainPane.frame != mainR { mainPane.frame = mainR.isNull ? .zero : mainR }
+        if scrollPane.frame != scrollR { scrollPane.frame = scrollR.isNull ? .zero : scrollR }
         for v in views where v.dragging == nil {
             guard let c = v.info else { continue }
             let pane = c.from.row >= g.fr && c.from.col >= g.fc ? scrollPane : mainPane

@@ -237,8 +237,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
                                  cellAt: { self.cellAt($0, g) })
     }
 
+    /// Load the sheet's charts as soon as the grid is in a window (opening a file doesn't go through invalidateData).
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { chartLayer.reload() }
+    }
+
     override func layout() {
         super.layout()
+        layer?.masksToBounds = true   // charts and popups never paint over the tab bar
         let sw = scrollerW
         vScroller.frame = NSRect(x: bounds.width - sw, y: 0, width: sw, height: bounds.height - sw)
         hScroller.frame = NSRect(x: 0, y: bounds.height - sw, width: bounds.width - sw, height: sw)
