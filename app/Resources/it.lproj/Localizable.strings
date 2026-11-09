@@ -278,3 +278,16 @@
 "Print gridlines" = "Stampa griglia";
 "On" = "Sì";
 "Off" = "No";
+"Sort" = "Ordina";
+"Sort…" = "Ordina…";
+"Sort by" = "Ordina per";
+"Then by" = "Quindi per";
+"A to Z" = "Dalla A alla Z";
+"Z to A" = "Dalla Z alla A";
+"(none)" = "(nessuna)";
+"My data has headers" = "I dati hanno intestazioni";
+"Column %@" = "Colonna %@";
+"Find All" = "Trova tutto";
+"Cell" = "Cella";
+"Value" = "Valore";
+"%d cells found" = "%d celle trovate";

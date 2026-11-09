@@ -43,6 +43,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             if let f = overlay, let font = f.font, oldValue > 0 { f.font = font.withSize(font.pointSize * zoom / oldValue) }
             positionEditor()
             setOffset(offset)
+            chartLayer.layoutCharts()   // Foglio charts
             updateScrollers()
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
@@ -213,6 +214,17 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         geoCache = nil
         needsDisplay = true
         updateScrollers()
+        chartLayer.reload()   // Foglio charts: data, sheet or layout may have changed
+    }
+
+    // MARK: Charts (Foglio charts integration: ChartsLayer.swift draws and positions the charts)
+    lazy var chartLayer = ChartLayer(grid: self)
+    func chartGeometry() -> ChartGridGeometry {
+        let g = geo
+        return ChartGridGeometry(zoom: zoom, header: CGSize(width: headerW, height: headerH), frozen: CGSize(width: frozenW(g), height: frozenH(g)),
+                                 fr: g.fr, fc: g.fc, visible: CGSize(width: bounds.width - scrollerW, height: bounds.height - scrollerW),
+                                 x: { self.x($0, g) }, y: { self.y($0, g) }, colW: { g.cols.size($0) }, rowH: { g.rows.size($0) },
+                                 cellAt: { self.cellAt($0, g) })
     }
 
     override func layout() {
@@ -221,6 +233,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         vScroller.frame = NSRect(x: bounds.width - sw, y: 0, width: sw, height: bounds.height - sw)
         hScroller.frame = NSRect(x: 0, y: bounds.height - sw, width: bounds.width - sw, height: sw)
         setOffset(offset)
+        chartLayer.layoutCharts()   // Foglio charts
         updateScrollers()
     }
 
@@ -238,6 +251,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         guard n != offset else { return }
         offset = n
         positionEditor()
+        chartLayer.layoutCharts()   // Foglio charts
         updateScrollers()
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
@@ -395,6 +409,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         drawHeaders(g, rowParts: rowParts, colParts: colParts, hair: hair, size: size)
         ctx.restoreGState()
 
+        chartLayer.gridDidDraw()   // Foglio charts: follow the row header width
         Perf.shared.frameDrawn(ms: (CACurrentMediaTime() - t0) * 1000)
     }
 
@@ -1537,6 +1552,55 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let firstBold = first.contains { $0.bold }
         return firstText && (secondHasNumbers || firstBold)
     }
+    /// Data ▸ Sort…: up to three keys, ascending/descending, optional header row.
+    @objc func sortDialog(_ sender: Any?) {
+        commitIfEditing()
+        guard let w = window, var r = dataRange(), r.rows > 1 else { NSSound.beep(); return }
+        let header = hasHeader(r)
+        let headerCells = book.viewport(sheet: sheet, rows: r.r0...r.r0, cols: r.c0...r.c1)
+        func colTitle(_ c: Int, _ useHeader: Bool) -> String {
+            if useHeader, let h = headerCells.first(where: { $0.col == c }), !h.text.isEmpty { return h.text }
+            return String(format: L("Column %@"), columnName(c))
+        }
+        let a = NSAlert()
+        a.messageText = L("Sort")
+        let headerBox = NSButton(checkboxWithTitle: L("My data has headers"), target: nil, action: nil)
+        headerBox.state = header ? .on : .off
+        let rows = NSGridView()
+        rows.rowSpacing = 8
+        var pops: [(NSPopUpButton, NSPopUpButton)] = []
+        for i in 0..<3 {
+            let col = NSPopUpButton(frame: .zero, pullsDown: false)
+            if i > 0 { col.addItem(withTitle: L("(none)")) }
+            for c in r.c0...r.c1 { col.addItem(withTitle: colTitle(c, header)); col.lastItem?.tag = c }
+            if i == 0 { col.selectItem(withTag: min(max(active.col, r.c0), r.c1)) }
+            let ord = NSPopUpButton(frame: .zero, pullsDown: false)
+            ord.addItems(withTitles: [L("A to Z"), L("Z to A")])
+            rows.addRow(with: [NSTextField(labelWithString: i == 0 ? L("Sort by") : L("Then by")), col, ord])
+            pops.append((col, ord))
+        }
+        let stack = NSStackView(views: [headerBox, rows])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.frame = NSRect(x: 0, y: 0, width: 380, height: 130)
+        a.accessoryView = stack
+        a.addButton(withTitle: L("OK")); a.addButton(withTitle: L("Cancel"))
+        a.beginSheetModal(for: w) { [weak self] resp in
+            guard let self, resp == .alertFirstButtonReturn else { return }
+            if headerBox.state == .on { r.r0 += 1 }
+            guard r.rows > 1 else { return }
+            var keys: [(Int, Bool)] = []
+            for (i, (col, ord)) in pops.enumerated() {
+                if i > 0 && col.indexOfSelectedItem == 0 { continue }
+                guard let c = col.selectedItem?.tag else { continue }
+                if !keys.contains(where: { $0.0 == c }) { keys.append((c, ord.indexOfSelectedItem == 0)) }
+            }
+            guard !keys.isEmpty else { return }
+            self.book.sort(sheet: self.sheet, r, keys: keys)
+            self.contentChanged()
+        }
+    }
+
     @objc func sortAscending(_ sender: Any?) { sort(true) }
     @objc func sortDescending(_ sender: Any?) { sort(false) }
     private func sort(_ asc: Bool) {

@@ -6,7 +6,10 @@ private func currentController() -> SheetWindowController? {
 }
 
 /// Find & Replace utility panel acting on the frontmost workbook.
-final class FindPanel: NSPanel, NSSearchFieldDelegate {
+final class FindPanel: NSPanel, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private let results = NSTableView()
+    private let resultsScroll = NSScrollView()
+    private var hits: [(CellRef, String)] = []
     static let shared = FindPanel()
 
     private let findField = NSSearchField()
@@ -50,12 +53,26 @@ final class FindPanel: NSPanel, NSSearchFieldDelegate {
         next.keyEquivalent = "\r"
         let replace = NSButton(title: L("Replace"), target: self, action: #selector(replaceAction))
         let replaceAll = NSButton(title: L("Replace All"), target: self, action: #selector(replaceAllAction))
-        let buttons = NSStackView(views: [status, NSView(), replaceAll, replace, prev, next])
+        let findAll = NSButton(title: L("Find All"), target: self, action: #selector(findAllAction))
+        let buttons = NSStackView(views: [status, NSView(), findAll, replaceAll, replace, prev, next])
         buttons.setHuggingPriority(.defaultLow, for: .horizontal)
         status.textColor = .secondaryLabelColor
         status.font = .systemFont(ofSize: 11)
-        for v in [findRow, replaceRow, options, buttons] { root.addArrangedSubview(v) }
+        for (id, title, w) in [("c", L("Cell"), 70.0), ("v", L("Value"), 330.0)] {
+            let col = NSTableColumn(identifier: .init(id)); col.title = title; col.width = w
+            results.addTableColumn(col)
+        }
+        results.dataSource = self
+        results.delegate = self
+        results.usesAlternatingRowBackgroundColors = true
+        resultsScroll.documentView = results
+        resultsScroll.hasVerticalScroller = true
+        resultsScroll.borderType = .bezelBorder
+        resultsScroll.isHidden = true
+        resultsScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
+        for v in [findRow, replaceRow, options, buttons, resultsScroll] { root.addArrangedSubview(v) }
         buttons.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28).isActive = true
+        resultsScroll.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -28).isActive = true
         contentView = root
     }
 
@@ -74,6 +91,27 @@ final class FindPanel: NSPanel, NSSearchFieldDelegate {
         makeKeyAndOrderFront(nil)
         makeFirstResponder(findField)
         status.stringValue = ""
+    }
+
+    @objc private func findAllAction() {
+        guard let c = currentController(), !query.isEmpty else { return }
+        hits = c.grid.book.findAll(sheet: c.grid.sheet, query, flags: flags)
+        results.reloadData()
+        resultsScroll.isHidden = hits.isEmpty
+        status.stringValue = hits.isEmpty ? L("No matches") : String(format: L("%d cells found"), hits.count)
+        if let first = hits.first { c.grid.select(first.0) }
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { tableView === results ? hits.count : 0 }
+    func tableView(_ tableView: NSTableView, viewFor col: NSTableColumn?, row: Int) -> NSView? {
+        guard let h = hits[safe: row] else { return nil }
+        let t = NSTextField(labelWithString: col?.identifier.rawValue == "c" ? "\(columnName(h.0.col))\(h.0.row + 1)" : h.1)
+        t.lineBreakMode = .byTruncatingTail
+        return t
+    }
+    func tableViewSelectionDidChange(_ n: Notification) {
+        guard (n.object as? NSTableView) === results, let h = hits[safe: results.selectedRow], let c = currentController() else { return }
+        c.grid.select(h.0)
     }
 
     @objc private func findNextAction() { find(back: false) }

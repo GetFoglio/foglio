@@ -85,3 +85,8 @@ int32_t foglio_remove_duplicates(FoglioBook *b, uint32_t sheet, int32_t r0, int3
 char *foglio_defined_names(const FoglioBook *b);
 int32_t foglio_define_name(FoglioBook *b, const char *name, int32_t scope, const char *formula, char **err_out);
 int32_t foglio_delete_name(FoglioBook *b, const char *name, int32_t scope);
+
+// Multi-level sort: keys = n pairs (absolute 1-based column, ascending 1/0), most significant first.
+int32_t foglio_sort_multi(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1, const int32_t *keys, size_t n);
+// Find All: "row\tcol\ttext" lines (1-based), max 5000.
+char *foglio_find_all(const FoglioBook *b, uint32_t sheet, const char *query, uint32_t flags);

@@ -274,6 +274,21 @@ final class Workbook {
         _ = foglio_sort(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c, Int32(keyCol + 1), ascending)
         changed()
     }
+    /// keys: (0-based column, ascending), most significant first.
+    func sort(sheet: Int, _ r: GridRange, keys: [(Int, Bool)]) {
+        var flat: [Int32] = []
+        for (c, asc) in keys { flat.append(Int32(c + 1)); flat.append(asc ? 1 : 0) }
+        _ = flat.withUnsafeBufferPointer { foglio_sort_multi(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c, $0.baseAddress, keys.count) }
+        changed()
+    }
+    func findAll(sheet: Int, _ q: String, flags: UInt32) -> [(CellRef, String)] {
+        (Workbook.take(foglio_find_all(ptr, UInt32(sheet), q, flags)) ?? "").split(separator: "\n").compactMap { line in
+            let p = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard p.count == 3, let r = Int(p[0]), let c = Int(p[1]) else { return nil }
+            return (CellRef(row: r - 1, col: c - 1), p[2])
+        }
+    }
+
     func currentRegion(sheet: Int, row: Int, col: Int) -> GridRange {
         var o = [Int32](repeating: 0, count: 4)
         guard foglio_current_region(ptr, UInt32(sheet), Int32(row + 1), Int32(col + 1), &o) == 0 else {

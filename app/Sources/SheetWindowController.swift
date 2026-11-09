@@ -16,12 +16,25 @@ final class SheetTab: NSButton {
     var onDoubleClick: (() -> Void)?
     var contextMenu: (() -> NSMenu)?
     var tabColor: NSColor?
+    var onDragTo: ((CGFloat) -> Void)?     // x in the tab bar where the tab was dropped
     var isCurrent = false { didSet { needsDisplay = true } }
     private var hover = false { didSet { needsDisplay = true } }
 
     override func mouseDown(with e: NSEvent) {
         if e.clickCount == 2 { onDoubleClick?(); return }
-        super.mouseDown(with: e)
+        // Click selects; dragging sideways reorders the sheet (Excel).
+        let start = e.locationInWindow
+        var dragged = false
+        while let next = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { break }
+            if abs(next.locationInWindow.x - start.x) > 8 { dragged = true; NSCursor.closedHand.set() }
+        }
+        NSCursor.arrow.set()
+        if dragged, let up = window?.currentEvent, let bar = superview {
+            onDragTo?(bar.convert(up.locationInWindow, from: nil).x)
+        } else {
+            sendAction(action, to: target)
+        }
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -263,7 +276,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             (divider(), NSStackView.VisibilityPriority(700)),
             (group([numberFormatPopup, currency, percent, thousands, incDec, decDec]), NSStackView.VisibilityPriority(700)),
             (divider(), NSStackView.VisibilityPriority(600)),
-            (group([sum, sortUp, sortDown, filter, freeze]), NSStackView.VisibilityPriority(600)),
+            (group([sum, sortUp, sortDown, filter, freeze, ChartsUI.toolbarButton(target: self)]), NSStackView.VisibilityPriority(600)),   // Foglio charts
         ]
         for (v, p) in groups {
             bar.addView(v, in: .leading)
@@ -390,9 +403,19 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             b.isCurrent = i == grid.sheet
             b.setAccessibilityLabel(name)
             b.onDoubleClick = { [weak self] in self?.renameSheet(nil) }
+            b.onDragTo = { [weak self] x in self?.dropTab(i, atX: x) }
             b.contextMenu = { [weak self] in self?.tabMenu() ?? NSMenu() }
             tabsStack.addArrangedSubview(b)
         }
+    }
+
+    private func dropTab(_ sheet: Int, atX x: CGFloat) {
+        let tabs = tabsStack.arrangedSubviews.compactMap { $0 as? SheetTab }
+        guard let target = tabs.first(where: { $0.frame.maxX > x })?.tag ?? tabs.last?.tag, target != sheet else { return }
+        grid.clearAllFilters()
+        grid.book.moveSheet(sheet, to: target)
+        switchTo(sheet: target)
+        changed()
     }
 
     private func tabMenu() -> NSMenu {

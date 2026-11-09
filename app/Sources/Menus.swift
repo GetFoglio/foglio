@@ -132,6 +132,7 @@ enum Menus {
             .separator(),
             item("AutoSum", #selector(W.autoSumMenu(_:)), "t", [.command, .shift], tag: 0),
             item("Function…", #selector(W.insertFunction(_:))),
+            ChartsUI.insertMenuItem(),   // Foglio charts: Insert ▸ Chart (ChartsLayer.swift)
             submenu("Name", [
                 item("Define Name…", #selector(W.defineName(_:))),
                 item("Name Manager…", #selector(W.nameManager(_:)), "l", [.command, .control]),
@@ -192,6 +193,7 @@ enum Menus {
         main.addItem(submenu("Data", [
             item("Sort A to Z", #selector(GridView.sortAscending(_:)), symbol: "arrow.up"),
             item("Sort Z to A", #selector(GridView.sortDescending(_:)), symbol: "arrow.down"),
+            item("Sort…", #selector(GridView.sortDialog(_:)), "r", [.command, .shift]),
             .separator(),
             item("Filter", #selector(GridView.toggleFilter(_:)), "f", [.command, .shift], symbol: "line.3.horizontal.decrease.circle"),
             .separator(),

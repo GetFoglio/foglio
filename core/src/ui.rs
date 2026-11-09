@@ -516,7 +516,18 @@ fn sort_key(v: &CellValue) -> (u8, f64, String) {
 /// Formulas move with their row (relative references adjusted), styles move too. One undo step.
 #[no_mangle]
 pub extern "C" fn foglio_sort(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32, key_col: i32, ascending: bool) -> i32 {
+    let keys = [key_col, ascending as i32];
+    unsafe { foglio_sort_multi(b, sheet, r0, c0, r1, c1, keys.as_ptr(), 1) }
+}
+
+/// Multi-level sort: `keys` holds `n` pairs (absolute column, ascending ? 1 : 0), most significant first.
+#[no_mangle]
+pub unsafe extern "C" fn foglio_sort_multi(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32, keys: *const i32, n: usize) -> i32 {
     let Some(b) = book(b) else { return -1 };
+    if keys.is_null() || n == 0 {
+        return -1;
+    }
+    let keys: Vec<(i32, bool)> = std::slice::from_raw_parts(keys, n * 2).chunks(2).map(|k| (k[0], k[1] != 0)).collect();
     let r = guard(-1, || {
         let (r0, r1, c0, c1) = (r0.min(r1), r0.max(r1), c0.min(c1), c0.max(c1));
         let model = b.model.get_model();
@@ -527,16 +538,29 @@ pub extern "C" fn foglio_sort(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, 
         if r1 <= r0 || c1 < c0 {
             return 0;
         }
-        let mut order: Vec<(i32, (u8, f64, String))> = (r0..=r1)
-            .map(|r| (r, sort_key(&model.get_cell_value_by_index(sheet, r, key_col).unwrap_or(CellValue::None))))
+        let mut order: Vec<(i32, Vec<(u8, f64, String)>)> = (r0..=r1)
+            .map(|r| {
+                let k = keys
+                    .iter()
+                    .map(|(c, _)| sort_key(&model.get_cell_value_by_index(sheet, r, *c).unwrap_or(CellValue::None)))
+                    .collect();
+                (r, k)
+            })
             .collect();
         order.sort_by(|a, b| {
-            let (ka, kb) = (&a.1, &b.1);
-            if ka.0 == 9 || kb.0 == 9 {
-                return ka.0.cmp(&kb.0); // blanks last in both directions
+            for (i, (_, asc)) in keys.iter().enumerate() {
+                let (ka, kb) = (&a.1[i], &b.1[i]);
+                let o = if ka.0 == 9 || kb.0 == 9 {
+                    ka.0.cmp(&kb.0) // blanks last in both directions
+                } else {
+                    let o = ka.0.cmp(&kb.0).then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal)).then(ka.2.cmp(&kb.2));
+                    if *asc { o } else { o.reverse() }
+                };
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
             }
-            let o = ka.0.cmp(&kb.0).then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal)).then(ka.2.cmp(&kb.2));
-            if ascending { o } else { o.reverse() }
+            a.0.cmp(&b.0) // stable
         });
         let mut data = serde_json::Map::new();
         for (i, (src, _)) in order.iter().enumerate() {
@@ -560,6 +584,36 @@ pub extern "C" fn foglio_sort(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, 
     });
     b.style_cache.clear();
     r
+}
+
+/// Every matching cell (row-major), as "row\tcol\ttext" lines (1-based), capped at 5000. Same flags as foglio_find.
+#[no_mangle]
+pub unsafe extern "C" fn foglio_find_all(b: *const FoglioBook, sheet: u32, query: *const c_char, flags: u32) -> *mut c_char {
+    let (Some(b), Some(q)) = (book_ref(b), cstr(query)) else { return ptr::null_mut() };
+    if q.is_empty() {
+        return to_c(String::new());
+    }
+    let case = flags & 1 != 0;
+    let whole = flags & 2 != 0;
+    let formulas = flags & 4 != 0;
+    let needle = if case { q.to_string() } else { q.to_lowercase() };
+    let model = b.model.get_model();
+    let Some(ws) = model.workbook.worksheets.get(sheet as usize) else { return ptr::null_mut() };
+    let mut cells: Vec<(i32, i32)> = ws.sheet_data.cells().map(|(r, c, _)| (r, c)).collect();
+    cells.sort_unstable();
+    let mut out = Vec::new();
+    for (r, c) in cells {
+        let shown = b.model.get_formatted_cell_value(sheet, r, c).unwrap_or_default();
+        let hay = if formulas { b.model.get_cell_content(sheet, r, c).unwrap_or_default() } else { shown.clone() };
+        let hay = if case { hay } else { hay.to_lowercase() };
+        if if whole { hay == needle } else { hay.contains(&needle) } {
+            out.push(format!("{r}\t{c}\t{}", shown.replace(['\t', '\n'], " ")));
+            if out.len() >= 5000 {
+                break;
+            }
+        }
+    }
+    to_c(out.join("\n"))
 }
 
 // ---------- navigation helpers ----------

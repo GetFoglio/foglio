@@ -333,6 +333,16 @@ enum UIScript {
             case "transpose": c.grid.pasteTransposed()
             case "removedups": c.grid.removeDuplicates(nil)
             case "insertrows": c.grid.insertRows(nil)
+            case "sortkeys": // sortkeys A2:B5 A+ B-
+                let p = arg.split(separator: " ").map(String.init)
+                if let r = FormulaText.gridRange(p[0].uppercased()) {
+                    let keys = p.dropFirst().compactMap { k -> (Int, Bool)? in
+                        guard let c = parseA1(String(k.dropLast()) + "1")?.col else { return nil }
+                        return (c, k.hasSuffix("+"))
+                    }
+                    c.grid.book.sort(sheet: c.grid.sheet, r, keys: keys); c.grid.contentChanged()
+                }
+            case "findall": print("FOUND \(c.grid.book.findAll(sheet: c.grid.sheet, arg, flags: 0).count)")
             case "namebox": c.nameBoxForTesting(arg)
             case "showformulas": c.grid.toggleShowFormulas(nil)
             case "recalc": c.grid.recalculate(nil)
@@ -357,6 +367,7 @@ enum UIScript {
                 for w in NSApp.windows where w.isVisible && (w is CompletionPopup || w is HintPopup) {
                     print("POPUP \(type(of: w)) \((w as? CompletionPopup)?.items.prefix(5).joined(separator: ",") ?? "")")
                 }
+            case "chart": ChartsUI.script(arg, on: c)   // Foglio charts: see ChartsUI.script
             case "dump":
                 func walk(_ v: NSView, _ depth: Int) {
                     if v is NSButton || v is NSTextField || v is NSPopUpButton {
