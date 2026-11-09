@@ -30,19 +30,29 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
 - Function autocomplete with descriptions, argument hints (current argument in bold),
   an *Insert Function* browser with all ~500 functions, and F4 to cycle `$` references.
 - Fill handle (drag, or double-click to fill down), Fill Down ⌘D / Right ⌘R, AutoSum,
-  copy/paste with relative references (and plain text from/to other apps), Paste Values.
-- Formatting: font size, bold/italic/underline/strikethrough, text and fill colours, borders,
+  copy/paste with relative references (and plain text from/to other apps), Paste Special (⌃⌘V:
+  values, formats, transpose), paste repeated over a larger selection, drag the selection border
+  to move cells (⌥ to copy), Insert/Delete Cells with shift (⌃I / ⌘−), Repeat (⌘Y),
+  AutoComplete of text already in the column, Show Formulas (⌃`).
+- Formatting: font family and size, bold/italic/underline/strikethrough, text and fill colours (Excel palette), borders,
   alignment, wrap text (rows grow automatically), merge & center, number formats
   (General, Number, Currency, Accounting, Date, Time, %, Fraction, Scientific, Text, custom codes)
   with a *Format Cells* dialog (⌘1); conditional formatting from Excel files is displayed.
 - Rows and columns: resize by dragging (double-click to autofit), insert, delete, hide/unhide;
-  freeze panes; zoom 25–400 % (pinch, ⌘+ / ⌘−); gridlines toggle.
-- Data: sort A→Z / Z→A (with header detection), AutoFilter with value checklists, Find & Replace,
-  Go To; conditional formatting rules (greater/less/between/equal, text contains, duplicates,
+  freeze panes; zoom 25–400 % (pinch, ⌥⌘+ / ⌥⌘−); gridlines toggle; sheet tab colours and drag-to-reorder.
+- Data: sort A→Z / Z→A and multi-level Sort dialog (with header detection), AutoFilter with value
+  checklists, Find & Replace with Find All, Go To, Remove Duplicates, Text to Columns,
+  **Data Validation** (lists with in-cell dropdown, numbers, dates, text length, custom; input
+  messages; Stop/Warning/Information alerts), **Summarize by** (a live SUMIFS/COUNTIFS summary sheet,
+  a light pivot table), defined names (Name Box, Define Name, Name Manager); conditional formatting rules (greater/less/between/equal, text contains, duplicates,
   top/bottom N, above/below average, colour scales); Format Painter.
 - **Formulas in your language**: on an Italian Mac you type `=SOMMA(A1:A10;B2)`, `SE`, `CERCA.VERT`
   with `;` separators and decimal commas, exactly like Excel in Italian. Files always store formulas in
   Excel's standard (English) form, so they open everywhere. Also German, Spanish, French, English.
+- **Comments/notes** with red-corner indicators and hover popups; **hyperlinks** (⌘K, ⌘-click to open).
+- **Charts** (column, bar, line, pie, doughnut, area, scatter, stacked variants): Insert ▸ Chart or the
+  toolbar, move/resize on the sheet, properties sheet; read from and saved to `.xlsx`.
+- Printing: fit all columns on one page, optional gridlines, orientation and paper from the Print panel.
 - UI in English and Italian.
 
 **Files**
@@ -50,8 +60,8 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
   row heights, frozen panes, multiple sheets).
 - Opens `.xlsm` (macros are not run), `.xls`, `.xlsb`, `.ods` (values, formulas and dates), and
   `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and decimal-separator detection.
-- Charts (column, bar, line, pie, doughnut, area, scatter; stacked variants): Insert ▸ Chart
-  from the selection, move/resize on the sheet, properties sheet; read from and saved to `.xlsx`.
+- Comments, data validation, hyperlinks, tab colours, defined names, conditional formatting and charts
+  are read from and written to `.xlsx`.
 - Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
 
 **Formulas** — ~500 Excel functions via a patched fork of the [IronCalc](https://github.com/ironcalc/IronCalc) engine
@@ -71,13 +81,13 @@ families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit
 | Open a 100k-row xlsx (300k formulas) | 0.9 s, ~113 MB | | |
 | One edit, 1,000 VLOOKUPs over 20k rows | ~3 ms (incremental recalculation) | | |
 
-**Not yet supported**: pivot tables, comments/notes, data validation, images, macros,
-password-protected files, data bars/icon sets.
+**Not yet supported**: real pivot tables (use *Summarize by*), images, macros, password-protected files,
+data bars/icon sets, sparklines, threaded comments (shown as plain notes), charts in printouts.
 
 ## Testing
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 27 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 46 UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```
@@ -100,7 +110,14 @@ IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incr
 | Filter | ⇧⌘F |
 | Find / Replace / Go To | ⌘F / ⌥⌘F / ⌃G |
 | Insert date / time | ⌃; / ⌘; |
-| Zoom | ⌘+ / ⌘− / ⌘0, pinch |
+| Zoom | ⌥⌘+ / ⌥⌘− / ⌘0, pinch |
+| Paste Special / Repeat | ⌃⌘V / ⌘Y |
+| Insert / Delete cells | ⌃I / ⌘− |
+| Show formulas | ⌃` |
+| New comment / Link | ⇧F2 / ⌘K |
+| Number formats | ⌃⇧~ ⌃⇧! ⌃⇧$ ⌃⇧% ⌃⇧# ⌃⇧@ ⌃⇧^ |
+| Borders: outline / none | ⌥⌘0 / ⌥⌘− |
+| Open a validation list | ⌥↓ |
 | Recalculate everything | F9 or ⌘= |
 | Next / previous sheet | ⌃PageDown / ⌃PageUp, ⌥→ / ⌥← |
 | Format Painter | toolbar brush, then select the target |
