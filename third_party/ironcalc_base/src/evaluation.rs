@@ -44,6 +44,9 @@ use std::sync::Arc;
 
 use crate::calc_result::CalcResult;
 use crate::constants::{LAST_COLUMN, LAST_ROW};
+use crate::dependencies::{DependencyIndex, FormulaTemplate};
+
+mod incremental;
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
@@ -214,6 +217,14 @@ pub(crate) enum Restart {
     /// Now we set A1 = 0. A2 will read C1 and force it's evaluation that will still be blocked by the stale spill from the previous C1 evaluation.
     /// The evaluation of B2 will want to delete C2 and C3 which are the stale cells.
     StaleCells(CellReferenceIndex, Vec<CellKey>),
+    /// Foglio fork: in an incremental pass, this dynamic anchor is about to
+    /// change the size of its area. The incremental pass is abandoned and a
+    /// full evaluation runs instead.
+    AbandonIncremental(CellReferenceIndex),
+    /// Foglio fork: this anchor is about to spill into (or clear cells of) a
+    /// vector the lookup index of this pass was built from. The pass runs
+    /// again without the lookup index.
+    LookupCacheConflict(CellReferenceIndex),
 }
 
 impl Restart {
@@ -222,7 +233,9 @@ impl Restart {
             Restart::StaleRead { anchor, .. }
             | Restart::Conflict { anchor, .. }
             | Restart::SelfContradiction(anchor)
-            | Restart::StaleCells(anchor, _) => *anchor,
+            | Restart::StaleCells(anchor, _)
+            | Restart::AbandonIncremental(anchor)
+            | Restart::LookupCacheConflict(anchor) => *anchor,
         }
     }
 }
@@ -276,7 +289,9 @@ impl RestartLog {
             Restart::StaleRead { reader, .. } => vec![*reader],
             Restart::Conflict { readers, .. } => readers.clone(),
             Restart::SelfContradiction(_) => vec![],
-            Restart::StaleCells(..) => return Vec::new(),
+            Restart::StaleCells(..)
+            | Restart::AbandonIncremental(_)
+            | Restart::LookupCacheConflict(_) => return Vec::new(),
         };
         let mut newly_circular: Vec<CellReferenceIndex> = Vec::new();
         if let Restart::SelfContradiction(_) = restart {
@@ -421,6 +436,115 @@ pub(crate) struct Evaluation {
     /// restart, the cells stay on `stack`, still `Evaluating`, to be run again
     /// from the top once the recursion has unwound.
     pub(crate) unwinding: bool,
+    /// Foglio fork: incremental recalculation bookkeeping (see `Recalc`).
+    pub(crate) recalc: Recalc,
+    /// Foglio fork: during an incremental pass, the formula cells that must be
+    /// run. Any other formula cell keeps its stored value.
+    pub(crate) dirty: Option<HashSet<CellKey, KeyBuild>>,
+    /// Foglio fork: the CSE (legacy array) anchors found by the last full
+    /// pass, with their area `(width, height)`.
+    pub(crate) cse_anchors: Vec<(CellKey, (i32, i32))>,
+    /// Foglio fork: per-pass index of lookup vectors for exact-match lookups.
+    /// See `functions/lookup_cache.rs`.
+    pub(crate) lookup_cache: crate::functions::lookup_cache::LookupCache,
+    /// Foglio fork: a spill went into a vector of the lookup index; the rest
+    /// of this evaluation runs without it.
+    pub(crate) lookup_cache_off: bool,
+}
+
+/// Foglio fork: what incremental recalculation needs to remember between
+/// evaluations.
+///
+/// Invariant while `valid`: every formula cell holds the value a full
+/// evaluation of the current workbook would give it, except for the effects of
+/// the edits at the positions listed in `changed`; and `index`, if present,
+/// describes the formulas of the workbook except at those positions.
+/// Anything that cannot be described as "these positions changed" clears
+/// `valid` (`mark_full`), and the next evaluation is a full one.
+pub(crate) struct Recalc {
+    /// Set by `UserModel`, which reports every edit. A bare `Model` never
+    /// evaluates incrementally.
+    pub(crate) tracking: bool,
+    pub(crate) valid: bool,
+    /// Positions whose content changed since the last evaluation.
+    pub(crate) changed: Vec<CellKey>,
+    pub(crate) index: Option<DependencyIndex>,
+    /// Templates of the parsed formulas, by the address of the parsed node
+    /// (which is kept alive here, so the address cannot be reused).
+    pub(crate) templates: HashMap<usize, (Arc<crate::expressions::parser::Node>, Arc<FormulaTemplate>)>,
+    /// After every incremental evaluation, run a full one and compare all the
+    /// cells (`IRONCALC_CHECK_INCREMENTAL=1`, or `set_check_incremental`).
+    pub(crate) check: bool,
+    /// What the last evaluation was: `None` full, `Some(n)` incremental with
+    /// `n` formulas run.
+    pub(crate) last_incremental: Option<usize>,
+    /// The array formula areas `(sheet, row1, column1, row2, column2)` after
+    /// the last full evaluation, anchors included.
+    pub(crate) array_areas: Vec<(u32, i32, i32, i32, i32)>,
+    /// A dynamic array was blocked (`#SPILL!`) after the last full evaluation.
+    pub(crate) spill_blocked: bool,
+    /// Why the last full evaluation was not incremental (diagnostics).
+    pub(crate) full_reason: &'static str,
+    /// The last full evaluation found a circular reference.
+    pub(crate) cycles: bool,
+}
+
+impl Default for Recalc {
+    fn default() -> Self {
+        Recalc {
+            tracking: false,
+            valid: false,
+            changed: Vec::new(),
+            index: None,
+            templates: HashMap::new(),
+            check: std::env::var("IRONCALC_CHECK_INCREMENTAL")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(false),
+            last_incremental: None,
+            array_areas: Vec::new(),
+            spill_blocked: false,
+            full_reason: "",
+            cycles: false,
+        }
+    }
+}
+
+/// More changed positions than this and the next evaluation is a full one.
+const MAX_CHANGED: usize = 100_000;
+
+impl Recalc {
+    /// Forget everything: the next evaluation is a full one, and the index is
+    /// rebuilt when it is needed again.
+    pub(crate) fn mark_full(&mut self) {
+        self.valid = false;
+        self.index = None;
+        self.templates.clear();
+        self.changed.clear();
+    }
+
+    pub(crate) fn note_changed(&mut self, key: CellKey) {
+        if self.valid {
+            self.changed.push(key);
+            if self.changed.len() > MAX_CHANGED {
+                self.mark_full();
+            }
+        }
+    }
+
+    pub(crate) fn note_changed_area(&mut self, sheet: u32, row: i32, column: i32, width: i32, height: i32) {
+        if !self.valid {
+            return;
+        }
+        if (width as i64) * (height as i64) + self.changed.len() as i64 > MAX_CHANGED as i64 {
+            self.mark_full();
+            return;
+        }
+        for r in row..row + height {
+            for c in column..column + width {
+                self.changed.push((sheet, r, c));
+            }
+        }
+    }
 }
 
 /// How deep the recursion may go when nobody has said otherwise, in formulas
@@ -471,6 +595,11 @@ impl Default for Evaluation {
             max_stack: DEFAULT_MAX_STACK,
             stack_base: 0,
             unwinding: false,
+            recalc: Recalc::default(),
+            dirty: None,
+            cse_anchors: Vec::new(),
+            lookup_cache: Default::default(),
+            lookup_cache_off: false,
         }
     }
 }
@@ -504,6 +633,18 @@ impl<'a> Model<'a> {
     /// `#CIRC!` and keeps no spill cells: its stale cells are dropped when it
     /// is marked, so there is nothing of it to read or to contradict.
     pub fn evaluate(&mut self) {
+        // Foglio fork: bring the dependency index up to date with the edits
+        // reported since the last evaluation (or drop it), then evaluate all.
+        self.apply_changes_to_index();
+        self.evaluation.recalc.last_incremental = None;
+        self.evaluate_all();
+        let recalc = &mut self.evaluation.recalc;
+        recalc.valid = recalc.tracking;
+        recalc.changed.clear();
+    }
+
+    /// The upstream full evaluation.
+    fn evaluate_all(&mut self) {
         self.sync_anchor_order();
         // Every pass starts from the same sheet: what an abandoned pass wrote
         // is undone. This is what makes a pass a function of the anchor order.
@@ -512,7 +653,11 @@ impl<'a> Model<'a> {
         // anchor's when it is marked.
         let mut spills_before = self.dynamic_spills();
         let mut log = RestartLog::new();
+        self.evaluation.lookup_cache_off = false;
         while let Some(restart) = self.run_pass(&log.circular) {
+            if let Restart::LookupCacheConflict(_) = restart {
+                self.evaluation.lookup_cache_off = true;
+            }
             let marked = log.record(&restart, &mut self.evaluation.anchor_order);
             spills_before.retain(|(position, cell)| {
                 let dropped = match &restart {
@@ -530,6 +675,12 @@ impl<'a> Model<'a> {
             self.restore_dynamic_spills(&spills_before);
         }
         self.evaluation.restarts_in_last_evaluation = log.restarts;
+        // Foglio fork: which cells a cycle is reported on depends on where
+        // the recursion entered it. While the workbook has cycles, every
+        // evaluation is a full one (see `evaluation/incremental.rs`).
+        self.evaluation.recalc.cycles =
+            !self.evaluation.circular.is_empty() || !log.circular.is_empty();
+        self.record_array_areas();
         self.evaluate_conditional_formatting();
     }
 
@@ -579,15 +730,20 @@ impl<'a> Model<'a> {
     /// Every formula cell, in natural `(sheet, row, column)` order. The other
     /// cells are left out: there is nothing to evaluate in a constant, and a
     /// spill cell holds what its anchor, a formula, writes.
-    fn formula_positions(&self) -> Vec<CellReferenceIndex> {
+    fn formula_positions(&mut self) -> Vec<CellReferenceIndex> {
         let mut found = Vec::new();
+        let mut cse_anchors = Vec::new();
         for (sheet, worksheet) in self.sheets_with_formulas() {
             for (row, column, cell) in worksheet.sheet_data.cells() {
-                if FormulaCell::of(&cell).is_some() {
+                if let Some(formula_cell) = FormulaCell::of(&cell) {
                     found.push(CellReferenceIndex { sheet, row, column });
+                    if let Some((false, area)) = formula_cell.array {
+                        cse_anchors.push(((sheet, row, column), area));
+                    }
                 }
             }
         }
+        self.evaluation.cse_anchors = cse_anchors;
         found
     }
 
@@ -696,6 +852,8 @@ impl<'a> Model<'a> {
         state.unwinding = false;
         state.circular = circular_anchors.iter().copied().collect();
         state.in_pass = true;
+        // Foglio fork: the lookup index (see `functions/lookup_cache.rs`).
+        state.lookup_cache.reset(!state.lookup_cache_off);
         // dynamic links (HYPERLINK) are rebuilt on every evaluation
         self.links.clear();
         self.clear_variable_stack();
@@ -714,6 +872,7 @@ impl<'a> Model<'a> {
         }
         self.evaluation.in_pass = false;
         self.evaluation.root = None;
+        self.evaluation.lookup_cache.reset(false);
         restart
     }
 
@@ -803,6 +962,22 @@ impl<'a> Model<'a> {
             // before anyone read its cells. Restart with it before the reader.
             // Outside a pass there is no driver, so the anchor is simply
             // evaluated now.
+            // Foglio fork: in an incremental pass a dynamic anchor that runs
+            // keeps the size of its area (or the pass is abandoned), so what
+            // the spill cells of an anchor that does not run hold is current.
+            (ArrayKind::Dynamic, None) if self.evaluation.dirty.is_some() => {
+                let anchor_is_dirty = self
+                    .evaluation
+                    .dirty
+                    .as_ref()
+                    .is_some_and(|dirty| dirty.contains(&key(anchor_reference)));
+                if anchor_is_dirty {
+                    // Its area keeps its size (or the pass is abandoned), so
+                    // it can simply run first.
+                    self.evaluate_cell(anchor_reference);
+                }
+                self.stored_value(cell_reference)
+            }
             (ArrayKind::Dynamic, None) => {
                 if self.evaluation.in_pass {
                     // Inside a pass the driver has always set the root.
@@ -834,10 +1009,18 @@ impl<'a> Model<'a> {
             Some(CellState::Evaluated) => return self.stored_value(cell_reference),
             None => {}
         }
+        // Foglio fork: in an incremental pass a formula that is not dirty
+        // already holds its value.
+        if let Some(dirty) = &self.evaluation.dirty {
+            if !dirty.contains(&key) {
+                return self.stored_value(cell_reference);
+            }
+        }
         self.evaluation.cells.insert(key, CellState::Evaluating);
         // Everything above this length is this cell and what it needs.
         let base = self.evaluation.stack.len();
         self.evaluation.stack.push(cell_reference);
+
         if self.too_deep() {
             // Too deep. The cell is not run: it stays on the stack, still
             // `Evaluating`, and so will every cell above it as the recursion
@@ -933,6 +1116,21 @@ impl<'a> Model<'a> {
         } else {
             result
         };
+        // Foglio fork: in an incremental pass a dynamic anchor may only
+        // rewrite the area it has; anything else needs a full evaluation.
+        if self.evaluation.dirty.is_some() && self.evaluation.restart.is_none() {
+            if let Some((true, old_area)) = cell.array {
+                let new_area = match &result {
+                    CalcResult::Array(array) if !array.is_empty() && !array[0].is_empty() => {
+                        (array[0].len() as i32, array.len() as i32)
+                    }
+                    _ => (1, 1),
+                };
+                if new_area != old_area {
+                    self.evaluation.restart = Some(Restart::AbandonIncremental(cell_reference));
+                }
+            }
+        }
         let stored = if self.evaluation.restart.is_some() {
             // Abandoned pass: store nothing.
             Ok(())
@@ -1005,6 +1203,7 @@ impl<'a> Model<'a> {
         let Some(start) = self.evaluation.stack.iter().rposition(|c| *c == from) else {
             return;
         };
+
         for cell in &self.evaluation.stack[start..] {
             self.evaluation.circular.insert(key(*cell));
         }
@@ -1097,6 +1296,16 @@ impl<'a> Model<'a> {
     ) -> bool {
         if !self.evaluation.in_pass {
             return false;
+        }
+        // Foglio fork: values the lookup index was built from are about to
+        // change. Run the pass again without the index.
+        if self
+            .evaluation
+            .lookup_cache
+            .covers_any(writes.iter().chain(clears.iter()))
+        {
+            self.evaluation.restart = Some(Restart::LookupCacheConflict(anchor));
+            return true;
         }
         let seen = &self.evaluation.seen;
         let ranges = &self.evaluation.seen_ranges;

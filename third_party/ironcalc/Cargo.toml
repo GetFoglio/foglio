@@ -105,6 +105,8 @@ version = "0.4"
 
 [dependencies.ironcalc_base]
 version = "0.9"
+# Foglio fork: the patched engine next to this crate.
+path = "../ironcalc_base"
 
 [dependencies.itertools]
 version = "0.15"
@@ -133,3 +135,8 @@ features = [
     "serde",
     "v4",
 ]
+
+# Foglio fork: incremental recalculation checked on the xlsx corpus.
+[[test]]
+name = "incremental_corpus"
+path = "tests/incremental_corpus.rs"

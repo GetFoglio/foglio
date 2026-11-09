@@ -216,6 +216,10 @@ pub struct UserModel<'a> {
     history: History,
     send_queue: Vec<QueueDiffs>,
     pause_evaluation: bool,
+    /// Foglio fork: true while an operation whose changes have been reported
+    /// cell by cell (`Recalc::note_changed`) is running, so that its
+    /// evaluation may be incremental.
+    tracked_op: bool,
     /// What the user is looking at: selected sheet, selection and scroll
     /// position of each sheet, window size. Runtime state only: it is not
     /// part of the workbook and is not serialized.
@@ -251,12 +255,17 @@ impl<'a> Debug for UserModel<'a> {
 
 impl<'a> UserModel<'a> {
     /// Creates a user model from an existing model
-    pub fn from_model(model: Model) -> UserModel {
+    pub fn from_model(mut model: Model) -> UserModel {
+        // Foglio fork: whatever was done to the model before, the first
+        // evaluation is a full one; from then on edits are tracked.
+        model.evaluation.recalc.tracking = true;
+        model.evaluation.recalc.mark_full();
         UserModel {
             model,
             history: History::default(),
             send_queue: vec![],
             pause_evaluation: false,
+            tracked_op: false,
             view: WorkbookView::default(),
         }
     }
@@ -271,12 +280,15 @@ impl<'a> UserModel<'a> {
         timezone: &'a str,
         language_id: &'a str,
     ) -> Result<UserModel<'a>, String> {
-        let model = Model::new_empty(name, locale_id, timezone, language_id)?;
+        let mut model = Model::new_empty(name, locale_id, timezone, language_id)?;
+        model.evaluation.recalc.tracking = true;
+        model.evaluation.recalc.mark_full();
         Ok(UserModel {
             model,
             history: History::default(),
             send_queue: vec![],
             pause_evaluation: false,
+            tracked_op: false,
             view: WorkbookView::default(),
         })
     }
@@ -286,12 +298,15 @@ impl<'a> UserModel<'a> {
     /// See also:
     /// * [Model::from_bytes]
     pub fn from_bytes(s: &[u8], language_id: &'a str) -> Result<UserModel<'a>, String> {
-        let model = Model::from_bytes(s, language_id)?;
+        let mut model = Model::from_bytes(s, language_id)?;
+        model.evaluation.recalc.tracking = true;
+        model.evaluation.recalc.mark_full();
         Ok(UserModel {
             model,
             history: History::default(),
             send_queue: vec![],
             pause_evaluation: false,
+            tracked_op: false,
             view: WorkbookView::default(),
         })
     }
@@ -333,7 +348,10 @@ impl<'a> UserModel<'a> {
     /// * [UserModel::redo]
     pub fn undo(&mut self) -> Result<(), String> {
         if let Some(diff_list) = self.history.undo() {
-            self.apply_undo_diff_list(&diff_list)?;
+            self.tracked_op = self.note_simple_diff_list(&diff_list);
+            let result = self.apply_undo_diff_list(&diff_list);
+            self.tracked_op = false;
+            result?;
             self.send_queue.push(QueueDiffs {
                 r#type: DiffType::Undo,
                 list: diff_list.clone(),
@@ -348,7 +366,10 @@ impl<'a> UserModel<'a> {
     /// * [UserModel::redo]
     pub fn redo(&mut self) -> Result<(), String> {
         if let Some(diff_list) = self.history.redo() {
-            self.apply_diff_list(&diff_list)?;
+            self.tracked_op = self.note_simple_diff_list(&diff_list);
+            let result = self.apply_diff_list(&diff_list);
+            self.tracked_op = false;
+            result?;
             self.send_queue.push(QueueDiffs {
                 r#type: DiffType::Redo,
                 list: diff_list.clone(),
@@ -385,13 +406,44 @@ impl<'a> UserModel<'a> {
         self.pause_evaluation = false;
     }
 
-    /// Forces an evaluation of the model
+    /// Evaluates the model.
+    ///
+    /// Foglio fork: this is incremental when possible: it runs the formulas
+    /// that depend on the cells edited since the last evaluation, and the
+    /// volatile ones (`NOW()`, `RAND()`, `INDIRECT`, …). Anything it cannot
+    /// track precisely makes it a full evaluation. Use
+    /// [UserModel::evaluate_full] to recalculate every formula.
     ///
     /// See also:
     /// * [Model::evaluate]
     /// * [UserModel::pause_evaluation]
     pub fn evaluate(&mut self) {
+        self.model.evaluate_pending()
+    }
+
+    /// Foglio fork: evaluates every formula of the workbook (like Excel's
+    /// Ctrl+Alt+F9).
+    pub fn evaluate_full(&mut self) {
+        self.model.evaluation.recalc.mark_full();
         self.model.evaluate()
+    }
+
+    /// Foglio fork: `Some(n)` if the last evaluation was incremental and ran
+    /// `n` formulas, `None` if it was a full one.
+    pub fn last_evaluation_incremental(&self) -> Option<usize> {
+        self.model.last_evaluation_incremental()
+    }
+
+    /// Foglio fork: why the last evaluation was a full one (diagnostics).
+    pub fn last_full_evaluation_reason(&self) -> &'static str {
+        self.model.last_full_evaluation_reason()
+    }
+
+    /// Foglio fork: after every incremental evaluation, run a full one and
+    /// panic if any cell differs (slow; for tests and debugging). Also turned
+    /// on by the environment variable `IRONCALC_CHECK_INCREMENTAL=1`.
+    pub fn set_check_incremental(&mut self, check: bool) {
+        self.model.set_check_incremental(check)
     }
 
     /// Returns the list of pending diffs and removes them from the queue
@@ -465,9 +517,10 @@ impl<'a> UserModel<'a> {
             new_value: value.to_string(),
             old_value: Box::new(old_value),
         }];
+        self.model.evaluation.recalc.note_changed((sheet, row, column));
         self.set_user_input_with_link_diffs(sheet, row, column, value.to_string(), &mut diff_list)?;
 
-        self.evaluate_if_not_paused();
+        self.evaluate_changes_if_not_paused();
 
         let style = self.model.get_style_for_cell(sheet, row, column)?;
 
@@ -487,7 +540,7 @@ impl<'a> UserModel<'a> {
             self.model.set_row_height(sheet, row, cell_height)?;
         }
 
-        self.push_diff_list(diff_list);
+        self.push_tracked_diff_list(diff_list);
         Ok(())
     }
 
@@ -829,6 +882,13 @@ impl<'a> UserModel<'a> {
         }
         // Clearing the cells also removes their links: capture them for undo
         let link_diffs = self.range_link_diffs(range)?;
+        self.model.evaluation.recalc.note_changed_area(
+            sheet,
+            range.row,
+            range.column,
+            range.width,
+            range.height,
+        );
         self.model.range_clear_contents(range)?;
         let mut diff_list = vec![Diff::RangeClearContents {
             sheet,
@@ -839,8 +899,8 @@ impl<'a> UserModel<'a> {
             old_value,
         }];
         diff_list.extend(link_diffs);
-        self.push_diff_list(diff_list);
-        self.evaluate_if_not_paused();
+        self.push_tracked_diff_list(diff_list);
+        self.evaluate_changes_if_not_paused();
         Ok(())
     }
 
@@ -2286,6 +2346,10 @@ impl<'a> UserModel<'a> {
     }
 
     pub(crate) fn push_diff_list(&mut self, diff_list: DiffList) {
+        // Foglio fork: a safety net for incremental recalculation. Content
+        // changes are reported as changed positions, anything that is not
+        // known to leave every value alone makes the next evaluation full.
+        self.note_diff_list(&diff_list, true);
         self.send_queue.push(QueueDiffs {
             r#type: DiffType::Redo,
             list: diff_list.clone(),
@@ -2293,9 +2357,142 @@ impl<'a> UserModel<'a> {
         self.history.push(diff_list);
     }
 
+    /// Like `push_diff_list`, for an operation that has already reported the
+    /// positions it changed.
+    fn push_tracked_diff_list(&mut self, diff_list: DiffList) {
+        self.note_diff_list(&diff_list, false);
+        self.send_queue.push(QueueDiffs {
+            r#type: DiffType::Redo,
+            list: diff_list.clone(),
+        });
+        self.history.push(diff_list);
+    }
+
+    /// Foglio fork: reports the changes a diff list makes to the incremental
+    /// recalculation bookkeeping. Returns true if every diff is either a
+    /// change of cell contents (whose positions are reported if
+    /// `report_content`) or known not to affect any value.
+    fn note_diff_list(&mut self, diff_list: &DiffList, report_content: bool) -> bool {
+        let recalc = &mut self.model.evaluation.recalc;
+        let mut simple = true;
+        for diff in diff_list {
+            match diff {
+                Diff::SetCellValue {
+                    sheet, row, column, ..
+                } => {
+                    if report_content {
+                        recalc.note_changed((*sheet, *row, *column));
+                    }
+                }
+                Diff::RangeClearContents {
+                    sheet,
+                    row,
+                    column,
+                    width,
+                    height,
+                    ..
+                }
+                | Diff::RangeClearAll {
+                    sheet,
+                    row,
+                    column,
+                    width,
+                    height,
+                    ..
+                } => {
+                    if report_content {
+                        recalc.note_changed_area(*sheet, *row, *column, *width, *height);
+                    }
+                }
+                // Formatting, sizes and view state: no value depends on them.
+                // (Hidden rows do: SUBTOTAL. They are not in this list.)
+                Diff::CellClearFormatting { .. }
+                | Diff::SetCellStyle { .. }
+                | Diff::ApplyNamedStyle { .. }
+                | Diff::SetColumnWidth { .. }
+                | Diff::SetRowHeight { .. }
+                | Diff::SetColumnStyle { .. }
+                | Diff::SetRowStyle { .. }
+                | Diff::DeleteColumnStyle { .. }
+                | Diff::DeleteRowStyle { .. }
+                | Diff::SetFrozenRowsCount { .. }
+                | Diff::SetFrozenColumnsCount { .. }
+                | Diff::SetSheetColor { .. }
+                | Diff::SetShowGridLines { .. }
+                | Diff::SetTheme { .. }
+                | Diff::CreateNamedStyle { .. }
+                | Diff::DeleteNamedStyle { .. }
+                | Diff::UpdateNamedStyle { .. }
+                | Diff::SetCellLink { .. }
+                | Diff::SetWorkbookName { .. } => {}
+                _ => {
+                    simple = false;
+                    recalc.mark_full();
+                }
+            }
+        }
+        simple
+    }
+
+    /// Foglio fork: for undo/redo. If the list only changes cell contents
+    /// (and formatting), reports the positions and returns true; the
+    /// operation may then be evaluated incrementally.
+    fn note_simple_diff_list(&mut self, diff_list: &DiffList) -> bool {
+        let simple = diff_list.iter().all(|diff| {
+            !matches!(
+                diff,
+                Diff::SetArrayValue { .. }
+                    | Diff::SetColumnHidden { .. }
+                    | Diff::SetRowHidden { .. }
+                    | Diff::InsertRows { .. }
+                    | Diff::DeleteRows { .. }
+                    | Diff::InsertColumns { .. }
+                    | Diff::DeleteColumns { .. }
+                    | Diff::DeleteSheet { .. }
+                    | Diff::NewSheet { .. }
+                    | Diff::DuplicateSheet { .. }
+                    | Diff::RenameSheet { .. }
+                    | Diff::MoveSheet { .. }
+                    | Diff::SetSheetState { .. }
+                    | Diff::CreateDefinedName { .. }
+                    | Diff::DeleteDefinedName { .. }
+                    | Diff::UpdateDefinedName { .. }
+                    | Diff::MoveColumns { .. }
+                    | Diff::MoveRows { .. }
+                    | Diff::SetLocale { .. }
+                    | Diff::SetTimezone { .. }
+                    | Diff::AddConditionalFormatting { .. }
+                    | Diff::DeleteConditionalFormatting { .. }
+                    | Diff::UpdateConditionalFormatting { .. }
+                    | Diff::SwapConditionalFormattingPriority { .. }
+                    | Diff::SetMergedCells { .. }
+            )
+        });
+        if !simple {
+            self.model.evaluation.recalc.mark_full();
+            return false;
+        }
+        self.note_diff_list(diff_list, true)
+    }
+
+    /// Evaluates after an operation that may change anything: a full
+    /// evaluation (Foglio fork: unless the operation reported its changes,
+    /// see `tracked_op`).
     pub(super) fn evaluate_if_not_paused(&mut self) {
+        if !self.tracked_op {
+            self.model.evaluation.recalc.mark_full();
+            self.model.evaluation.recalc.full_reason = "operation not tracked";
+        }
         if !self.pause_evaluation {
-            self.model.evaluate();
+            self.model.evaluate_pending();
+        }
+    }
+
+    /// Foglio fork: evaluates after an operation that reported the positions
+    /// it changed: incrementally if possible.
+    fn evaluate_changes_if_not_paused(&mut self) {
+        if !self.pause_evaluation {
+            self.model.evaluate_pending();
         }
     }
 }

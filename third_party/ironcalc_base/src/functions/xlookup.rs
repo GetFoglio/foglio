@@ -8,6 +8,7 @@ use super::{
         binary_search_descending_or_greater, binary_search_descending_or_smaller,
         binary_search_or_greater, binary_search_or_smaller,
     },
+    lookup_cache::LookupMode,
     util::{compare_values, from_wildcard_to_regex, result_matches_regex},
 };
 
@@ -269,8 +270,28 @@ impl<'a> Model<'a> {
                         };
                         match search_mode {
                             SearchMode::StartAtFirstItem | SearchMode::StartAtLastItem => {
-                                let array = &self.prepare_array(&left, &right, is_row_vector);
-                                match linear_search(&lookup_value, array, search_mode, match_mode) {
+                                // Foglio fork: exact matches go through the per-pass index.
+                                let cached = if search_mode == SearchMode::StartAtFirstItem
+                                    && match_mode == MatchMode::ExactMatch
+                                {
+                                    self.cached_exact_lookup(
+                                        &lookup_value,
+                                        left,
+                                        right,
+                                        LookupMode::Xlookup,
+                                    )
+                                } else {
+                                    None
+                                };
+                                let found = match cached {
+                                    Some(found) => found,
+                                    None => {
+                                        let array =
+                                            &self.prepare_array(&left, &right, is_row_vector);
+                                        linear_search(&lookup_value, array, search_mode, match_mode)
+                                    }
+                                };
+                                match found {
                                     Some(index) => {
                                         let row_index =
                                             if is_row_vector { index as i32 } else { 0 };

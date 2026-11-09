@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::binary_search::binary_search_on_array;
+use super::lookup_cache::LookupMode;
 use super::util::{compare_values, from_wildcard_to_regex, result_matches_regex, values_are_equal};
 
 mod address_areas;
@@ -409,6 +410,23 @@ impl<'a> Model<'a> {
             1
         };
         let match_range = self.evaluate_node_in_context(&args[1], cell);
+        // Foglio fork: exact matches in a range go through the per-pass index.
+        if match_type == 0 {
+            if let CalcResult::Range { left, right } = &match_range {
+                if let Some(found) =
+                    self.cached_exact_lookup(&target, *left, *right, LookupMode::Match)
+                {
+                    return match found {
+                        Some(l) => CalcResult::Number(l as f64 + 1.0),
+                        None => CalcResult::Error {
+                            error: Error::NA,
+                            origin: cell,
+                            message: "Not found".to_string(),
+                        },
+                    };
+                }
+            }
+        }
 
         // MATCH operates on a vector (a single row or single column). We
         // materialize the second argument, be it a range reference or an array
@@ -535,8 +553,28 @@ impl<'a> Model<'a> {
             };
         }
         // We look for `lookup_value` in the first row of the table
-        let search_vector = table.first_row(self, cell);
-        match lookup_index(&lookup_value, &search_vector, is_sorted) {
+        // Foglio fork: exact matches in a range go through the per-pass index.
+        let cached = match &table {
+            LookupTable::Range { left, right } if !is_sorted => self.cached_exact_lookup(
+                &lookup_value,
+                *left,
+                CellReferenceIndex {
+                    sheet: left.sheet,
+                    row: left.row,
+                    column: right.column,
+                },
+                LookupMode::Vlookup,
+            ),
+            _ => None,
+        };
+        let found = match cached {
+            Some(found) => found,
+            None => {
+                let search_vector = table.first_row(self, cell);
+                lookup_index(&lookup_value, &search_vector, is_sorted)
+            }
+        };
+        match found {
             Some(column) => table.get(self, row_index - 1, column as i32, cell),
             None => CalcResult::Error {
                 error: Error::NA,
@@ -599,8 +637,28 @@ impl<'a> Model<'a> {
             };
         }
         // We look for `lookup_value` in the first column of the table
-        let search_vector = table.first_column(self, cell);
-        match lookup_index(&lookup_value, &search_vector, is_sorted) {
+        // Foglio fork: exact matches in a range go through the per-pass index.
+        let cached = match &table {
+            LookupTable::Range { left, right } if !is_sorted => self.cached_exact_lookup(
+                &lookup_value,
+                *left,
+                CellReferenceIndex {
+                    sheet: left.sheet,
+                    row: right.row,
+                    column: left.column,
+                },
+                LookupMode::Vlookup,
+            ),
+            _ => None,
+        };
+        let found = match cached {
+            Some(found) => found,
+            None => {
+                let search_vector = table.first_column(self, cell);
+                lookup_index(&lookup_value, &search_vector, is_sorted)
+            }
+        };
+        match found {
             Some(row) => table.get(self, row as i32, column_index - 1, cell),
             None => CalcResult::Error {
                 error: Error::NA,
