@@ -15,19 +15,77 @@
 written in Swift/AppKit on top of a Rust calculation core. The aim is simple: open and edit
 everyday spreadsheets quickly, feel at home on macOS, and stay small.
 
-> **Status: early development.** Foglio is a young project and many features are still being
-> built. Expect rough edges, and please don't trust it with your only copy of important data yet.
+> **Status: 1.0 preview.** Foglio handles everyday spreadsheets end to end. Keep backups of
+> important files: charts, pivot tables, macros and comments are not supported yet (see below).
 
 ## Features
 
-- **Native macOS app** — AppKit UI with a custom grid view, no Electron, no web views.
-- **Open formats** — works with `.xlsx`, and reads `.xls`, `.ods` and `.csv`
-  (format support is still being extended).
-- **Excel-compatible formulas** — around 400 Excel functions, provided by the
-  [IronCalc](https://github.com/ironcalc/IronCalc) engine.
-- **Tiny footprint** — a single universal (Apple silicon + Intel) app of a few megabytes
-  that starts instantly.
-- **Free and open source** — dual-licensed MIT / Apache-2.0.
+**Feels like Excel, behaves like a Mac app**
+- Native AppKit UI: custom high-performance grid, real macOS documents (Open Recent, Save/Save As,
+  Revert, Duplicate, window tabs, full screen, dark mode, Print and Export PDF).
+- Excel-style toolbar, formula bar with Name Box (type `B12` or `Sheet2!A1:C9` to jump), sheet tabs
+  (add, rename, duplicate, move, hide, delete) and a status bar with Average / Count / Min / Max / Sum.
+- In-cell editing with Excel's Enter / Edit / **Point** modes: while typing a formula, click or use the
+  arrow keys to insert references; references are colour-coded in the formula and on the grid.
+- Function autocomplete with descriptions, argument hints (current argument in bold),
+  an *Insert Function* browser with all ~500 functions, and F4 to cycle `$` references.
+- Fill handle (drag, or double-click to fill down), Fill Down ⌘D / Right ⌘R, AutoSum,
+  copy/paste with relative references (and plain text from/to other apps), Paste Values.
+- Formatting: font size, bold/italic/underline/strikethrough, text and fill colours, borders,
+  alignment, wrap text (rows grow automatically), merge & center, number formats
+  (General, Number, Currency, Accounting, Date, Time, %, Fraction, Scientific, Text, custom codes)
+  with a *Format Cells* dialog (⌘1); conditional formatting from Excel files is displayed.
+- Rows and columns: resize by dragging (double-click to autofit), insert, delete, hide/unhide;
+  freeze panes; zoom 25–400 % (pinch, ⌘+ / ⌘−); gridlines toggle.
+- Data: sort A→Z / Z→A (with header detection), AutoFilter with value checklists, Find & Replace,
+  Go To.
+- **Formulas in your language**: on an Italian Mac you type `=SOMMA(A1:A10;B2)`, `SE`, `CERCA.VERT`
+  with `;` separators and decimal commas, exactly like Excel in Italian. Files always store formulas in
+  Excel's standard (English) form, so they open everywhere. Also German, Spanish, French, English.
+- UI in English and Italian.
+
+**Files**
+- `.xlsx` read/write with formatting (fonts, fills, borders, number formats, merges, column widths,
+  row heights, frozen panes, multiple sheets).
+- Opens `.xlsm` (macros are not run), `.xls`, `.xlsb`, `.ods` (values, formulas and dates), and
+  `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and decimal-separator detection.
+- Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
+
+**Formulas** — ~500 Excel functions via the [IronCalc](https://github.com/ironcalc/IronCalc) engine,
+including XLOOKUP, FILTER/SORT/UNIQUE, LET/LAMBDA, SUMIFS, the date, text, statistical and financial
+families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit.
+
+**Small and fast** (measured on an M4, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md))
+
+| | Foglio | LibreOffice | Excel |
+|---|---|---|---|
+| App size | 16 MB (universal) | ~780 MB | 1–2 GB |
+| Memory, empty sheet | ~40 MB | ~360 MB | — |
+| Launch to first frame (warm) | ~0.2 s | seconds | seconds |
+| Scrolling a 20k-row sheet | ~3 ms per frame, no dropped frames | | |
+
+**Not yet supported**: charts, pivot tables, comments/notes, data validation, images, macros,
+password-protected files, editing conditional-formatting rules.
+
+## Keyboard shortcuts (Excel for Mac conventions)
+
+| Action | Keys |
+|---|---|
+| Edit cell / new line in cell | F2, ⌥↩ / ⌥↩ while editing |
+| Confirm and move down / right / up | ↩ / ⇥ / ⇧↩ |
+| Fill selection with the entry | ⌘↩ |
+| Jump to edge of data, extend | ⌘ arrow, ⇧⌘ arrow |
+| Select region / whole sheet | ⌘A, ⌘A again |
+| Select row / column | ⇧Space / ⌃Space |
+| Cycle absolute references | F4 |
+| Format Cells | ⌘1 |
+| Fill Down / Right | ⌘D / ⌘R |
+| Paste Values | ⌥⇧⌘V |
+| AutoSum | ⇧⌘T |
+| Filter | ⇧⌘F |
+| Find / Replace / Go To | ⌘F / ⌥⌘F / ⌃G |
+| Insert date / time | ⌃; / ⌘; |
+| Zoom | ⌘+ / ⌘− / ⌘0, pinch |
 
 ## Requirements
 
