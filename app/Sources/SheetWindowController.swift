@@ -87,7 +87,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         NSLayoutConstraint.activate(gridConstraints)
         grid = g
         formulaField.delegate = g
-        formulaField.onFocus = { [weak g] in if let g, let f = g.window?.firstResponder as? NSTextView, f.delegate === self.formulaField { g.beginBarEditing(self.formulaField) } }
+        formulaField.onFocus = { [weak self, weak g] in
+            guard let self, let g, let f = g.window?.firstResponder as? NSTextView, f.delegate === self.formulaField else { return }
+            g.beginBarEditing(self.formulaField)
+        }
         doc?.activeSheet = 0
         reloadTabs()
         gridSelectionChanged(g)
@@ -420,18 +423,21 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             guard let self, r == .alertFirstButtonReturn else { return }
             let s = self.grid.sheet
             self.grid.book.deleteSheet(s)
-            self.switchTo(sheet: max(0, s - 1))
+            self.grid.clearAllFilters()
+            let t = max(0, s - 1)
+            self.switchTo(sheet: t)
+            if t == s { self.grid.resetForSheet() }
             self.changed()
         }
     }
 
     @objc func moveSheetLeft(_ sender: Any?) {
         guard grid.sheet > 0 else { return }
-        grid.book.moveSheet(grid.sheet, to: grid.sheet - 1); switchTo(sheet: grid.sheet - 1); changed()
+        grid.clearAllFilters(); grid.book.moveSheet(grid.sheet, to: grid.sheet - 1); switchTo(sheet: grid.sheet - 1); changed()
     }
     @objc func moveSheetRight(_ sender: Any?) {
         guard grid.sheet < grid.book.sheetNames.count - 1 else { return }
-        grid.book.moveSheet(grid.sheet, to: grid.sheet + 1); switchTo(sheet: grid.sheet + 1); changed()
+        grid.clearAllFilters(); grid.book.moveSheet(grid.sheet, to: grid.sheet + 1); switchTo(sheet: grid.sheet + 1); changed()
     }
     @objc func hideSheet(_ sender: Any?) {
         let visible = (0..<grid.book.sheetNames.count).filter { !grid.book.isSheetHidden($0) }
@@ -477,7 +483,13 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         if formulaField.currentEditor() == nil { formulaField.stringValue = text }
     }
 
-    func gridContentChanged(_ g: GridView) { changed() }
+    func gridContentChanged(_ g: GridView) {
+        // Undo/redo can add or remove sheets: keep tabs and the grid's sheet valid.
+        let n = g.book.sheetNames.count
+        if g.sheet >= n { switchTo(sheet: max(0, n - 1)) }
+        reloadTabs()
+        changed()
+    }
 
     func gridModeChanged(_ g: GridView) {
         cancelButton.isEnabled = g.isEditing
@@ -633,7 +645,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         if code.lowercased() == "general" {
             // Start from the decimals currently shown, like Excel.
             let text = grid.book.formatted(sheet: grid.sheet, row: grid.active.row, col: grid.active.col)
-            let decimals = text.split(separator: ".").dropFirst().first?.count ?? 0
+            let sep: Character = FormulaLocale.current.locale.hasPrefix("en") ? "." : ","
+            let decimals = text.split(separator: sep).dropFirst().first.map { $0.prefix { $0.isNumber }.count } ?? 0
             code = decimals > 0 ? "0." + String(repeating: "0", count: decimals) : "0"
         }
         grid.setStyle("num_fmt", NumberFormats.adjustDecimals(code, by: d))

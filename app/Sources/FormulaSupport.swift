@@ -55,7 +55,7 @@ enum FormulaText {
         if let r = parseA1Range(body) { return r }
         let parts = body.split(separator: ":").map(String.init)
         guard parts.count == 2 else { return nil }
-        if let a = Int(parts[0]), let b = Int(parts[1]), a > 0, b > 0 {
+        if let a = Int(parts[0]), let b = Int(parts[1]), a > 0, b > 0, a <= Sheet.maxRows, b <= Sheet.maxRows {
             return GridRange(r0: a - 1, c0: 0, r1: b - 1, c1: Sheet.maxCols - 1)
         }
         if let a = parseA1(parts[0] + "1"), let b = parseA1(parts[1] + "1") {

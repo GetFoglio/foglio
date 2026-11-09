@@ -184,10 +184,14 @@ enum UIScript {
 
     /// Sends a real key event through the window (same path as the keyboard).
     static func sendKey(_ chars: String, code: UInt16, mods: NSEvent.ModifierFlags, to w: NSWindow) {
+        GridView.testModifiers = mods
+        defer { GridView.testModifiers = nil }
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
                                         windowNumber: w.windowNumber, context: nil, characters: chars,
                                         charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                // Same order as the run loop: the editor's key monitor first, then normal dispatch.
+                if type == .keyDown, let g = (w.windowController as? SheetWindowController)?.grid, g.handleEditingKey(e) { continue }
                 NSApp.sendEvent(e)
             }
         }
@@ -297,6 +301,11 @@ enum UIScript {
                     sendClick(at: c.grid.headerPoint(row: r - 1), count: 1, to: w)
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
+            case "sortasc": c.grid.sortAscending(nil)
+            case "findtext": _ = c.grid.find(arg, flags: 0)
+            case "rowhidden":
+                if let r = Int(arg) { print("HIDDEN \(r) \(c.grid.book.layout(sheet: c.grid.sheet).rows.contains { $0.0 == r - 1 && $0.2 })") }
+            case "sortdesc": c.grid.sortDescending(nil)
             case "debug":
                 print("DEBUG keyWindow=\(NSApp.keyWindow != nil) isActive=\(NSApp.isActive) cycle=\(String(describing: c.grid.book.cycleReference("=B2*3", start: 3, end: 3))) cycle2=\(String(describing: c.grid.book.cycleReference("B2*3", start: 2, end: 2)))")
             case "popup":

@@ -61,6 +61,7 @@ final class SheetPainter {
         k = k << 1 | (c.strike ? 1 : 0)
         k = k << 1 | (c.kind == 3 ? 1 : 0)
         k = k << 1 | (c.wrap ? 1 : 0)
+        k = k << 2 | (c.wrap ? Int(min(c.align, 3)) : 0)
         // Automatic text colour on a filled cell follows the fill's brightness (readable in dark mode too).
         let onFill: Int = c.fg != VCell.noColor || c.bg == VCell.noColor ? 0 : (SheetPainter.luminance(c.bg) > 0.5 ? 1 : 2)
         k = k << 2 | onFill

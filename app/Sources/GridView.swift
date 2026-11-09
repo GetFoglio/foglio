@@ -23,17 +23,23 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     var sheet = 0 {
         didSet {
             guard sheet != oldValue else { return }
-            offset = .zero
-            active = CellRef(row: 0, col: 0); cursor = active
-            selection = GridRange(active, active)
-            invalidateData()
-            notifySelection()
+            resetForSheet()
         }
+    }
+
+    /// Fresh view state for the current sheet (also after the sheet under us was deleted).
+    func resetForSheet() {
+        offset = .zero
+        active = CellRef(row: 0, col: 0); cursor = active
+        selection = GridRange(active, active)
+        invalidateData()
+        notifySelection()
     }
 
     var zoom: CGFloat = 1 {
         didSet {
             zoom = min(4, max(0.25, zoom))
+            if let f = overlay, let font = f.font, oldValue > 0 { f.font = font.withSize(font.pointSize * zoom / oldValue) }
             positionEditor()
             setOffset(offset)
             updateScrollers()
@@ -121,6 +127,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private(set) var selection = GridRange(r0: 0, c0: 0, r1: 0, c1: 0)
     var refHighlights: [FormulaText.Ref] = [] { didSet { needsDisplay = true } }
     private(set) var cutRange: (sheet: Int, range: GridRange)?
+    /// Size of the last internal copy, clamped to the used range like the engine does.
+    private var copied: (token: UInt64, rows: Int, cols: Int)?
 
     // Editing ---------------------------------------------------------------
     enum EditMode { case enter, edit }
@@ -131,6 +139,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private var editTarget = CellRef(row: 0, col: 0)
     private var editSheet = 0
     private var keyMonitor: Any?
+    private var editView: (active: CellRef, cursor: CellRef, sel: GridRange, offset: CGPoint)?
     var isEditing: Bool { editField != nil }
     var isPointing: Bool { session?.canPoint() ?? false }
 
@@ -157,6 +166,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private var frameStamps: [CFTimeInterval] = []
 
     static let pasteboardType = NSPasteboard.PasteboardType("org.foglio.cells")
+    /// Modifier keys of the key being handled (synthetic test events don't set NSApp.currentEvent).
+    static var testModifiers: NSEvent.ModifierFlags?
+    private var currentModifiers: NSEvent.ModifierFlags { GridView.testModifiers ?? NSApp.currentEvent?.modifierFlags ?? [] }
 
     // AutoFilter (one table per sheet)
     private(set) var filters: [Int: FilterState] = [:]
@@ -222,8 +234,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private func extents() -> (CGFloat, CGFloat, CGFloat, CGFloat) {
         let g = geo
         let visW = max(1, viewSize.width - headerW - frozenW(g)), visH = max(1, viewSize.height - headerH - frozenH(g))
-        let usedW = g.cols.pos(min(Sheet.maxCols, max(g.maxCol, selection.c1) + 1)) - frozenW(g)
-        let usedH = g.rows.pos(min(Sheet.maxRows, max(g.maxRow, selection.r1) + 1)) - frozenH(g)
+        let selC1 = selection.isFullRows ? 0 : selection.c1, selR1 = selection.isFullColumns ? 0 : selection.r1
+        let usedW = g.cols.pos(min(Sheet.maxCols, max(g.maxCol, selC1) + 1)) - frozenW(g)
+        let usedH = g.rows.pos(min(Sheet.maxRows, max(g.maxRow, selR1) + 1)) - frozenH(g)
         let contentW = max(usedW + visW * 0.5, offset.x + visW)
         let contentH = max(usedH + visH * 0.5, offset.y + visH)
         return (contentW, visW, contentH, visH)
@@ -292,7 +305,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if let d = dataCache[k] { return d }
         // Over-fetch a few columns on both sides so overflowing text knows its neighbours.
         let c0 = max(0, cols.lowerBound - 8), c1 = min(Sheet.maxCols - 1, cols.upperBound + 8)
-        let d = CellData(book.viewport(sheet: sheet, rows: rows, cols: c0...c1))
+        var cells = book.viewport(sheet: sheet, rows: rows, cols: c0...c1)
+        let vis = GridRange(r0: rows.lowerBound, c0: cols.lowerBound, r1: rows.upperBound, c1: cols.upperBound)
+        for m in geo.merges where m.intersects(vis) && !(rows.contains(m.r0) && (c0...c1).contains(m.c0)) {
+            cells += book.viewport(sheet: sheet, rows: m.r0...m.r0, cols: m.c0...m.c0)
+        }
+        let d = CellData(cells)
         if dataCache.count > 16 { dataCache.removeAll() }
         dataCache[k] = d
         return d
@@ -323,10 +341,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let fw = frozenW(g), fh = frozenH(g)
         let gridColor = NSColor.separatorColor.blended(withFraction: 0.45, of: bg) ?? .separatorColor
         var rowParts: [(ClosedRange<Int>, CGFloat, CGFloat)] = []
-        if g.fr > 0 { rowParts.append((0...(g.fr - 1), headerH, headerH + fh)) }
+        if g.fr > 0 { rowParts.append((0...min(g.fr - 1, g.rows.index(at: max(0, size.height - headerH))), headerH, headerH + fh)) }
         rowParts.append((rowsScrolled, headerH + fh, size.height))
         var colParts: [(ClosedRange<Int>, CGFloat, CGFloat)] = []
-        if g.fc > 0 { colParts.append((0...(g.fc - 1), headerW, headerW + fw)) }
+        if g.fc > 0 { colParts.append((0...min(g.fc - 1, g.cols.index(at: max(0, size.width - headerW))), headerW, headerW + fw)) }
         colParts.append((colsScrolled, headerW + fw, size.width))
 
         for (rr, y0, y1) in rowParts {
@@ -360,13 +378,21 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     private func clipped(_ r: CGRect, _ area: CGRect) -> CGRect { r.intersection(area.insetBy(dx: -4, dy: -4)) }
 
+    /// Like `clipped`, but a range in the scrolled area never paints over frozen rows/columns.
+    private func paneClipped(_ rect: CGRect, _ s: GridRange, _ g: Geo, _ area: CGRect) -> CGRect {
+        var pane = area.insetBy(dx: -4, dy: -4)
+        if g.fr > 0 && s.r0 >= g.fr { let t = headerH + frozenH(g) - 1; pane = CGRect(x: pane.minX, y: t, width: pane.width, height: max(0, pane.maxY - t)) }
+        if g.fc > 0 && s.c0 >= g.fc { let l = headerW + frozenW(g) - 1; pane = CGRect(x: l, y: pane.minY, width: max(0, pane.maxX - l), height: pane.height) }
+        return rect.intersection(pane)
+    }
+
     private func drawOverlays(_ g: Geo, hair: CGFloat, gridArea: CGRect) {
         let accent = NSColor.controlAccentColor
         // Formula references being edited
         let sheetName = book.sheetNames[safe: sheet]
         for (i, ref) in refHighlights.enumerated() where (ref.sheet == nil && editSheet == sheet) || ref.sheet == sheetName {
             let color = FormulaText.palette[i % FormulaText.palette.count]
-            let r = clipped(rangeRect(ref.range, g), gridArea)
+            let r = paneClipped(rangeRect(ref.range, g), ref.range, g, gridArea)
             guard !r.isNull else { continue }
             color.withAlphaComponent(0.10).setFill(); r.fill()
             color.setStroke()
@@ -379,7 +405,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         var sel = selection
         if isEditing && editSheet != sheet { sel = GridRange(r0: -1, c0: -1, r1: -1, c1: -1) }
         if sel.r0 >= 0 {
-            let selRect = clipped(rangeRect(sel, g), gridArea)
+            let selRect = paneClipped(rangeRect(sel, g), sel, g, gridArea)
             if !selRect.isNull {
                 let activeRect = rangeRect(mergeAt(active, g) ?? GridRange(active, active), g)
                 if !sel.isSingle && mergeAt(active, g) != sel {
@@ -393,7 +419,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
                 let border = NSBezierPath(rect: selRect.insetBy(dx: 0, dy: 0).offsetBy(dx: -hair, dy: -hair))
                 border.lineWidth = 2
                 border.stroke()
-                if !isEditing {
+                if !isEditing && selRect.contains(CGPoint(x: fillHandleRect(g).midX - 1, y: fillHandleRect(g).midY - 1)) {
                     let h = fillHandleRect(g)
                     painter.background.setFill(); h.insetBy(dx: -1, dy: -1).fill()
                     accent.setFill(); h.fill()
@@ -408,7 +434,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             p.stroke()
         }
         if let cut = cutRange, cut.sheet == sheet {
-            let r = clipped(rangeRect(cut.range, g), gridArea)
+            let r = paneClipped(rangeRect(cut.range, g), cut.range, g, gridArea)
             let p = NSBezierPath(rect: r.insetBy(dx: 1, dy: 1))
             p.lineWidth = 1.5
             p.setLineDash([4, 3], count: 2, phase: 0)
@@ -559,11 +585,12 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         notifySelection()
     }
 
-    func select(range r: GridRange, active a: CellRef? = nil) {
+    func select(range r: GridRange, active a: CellRef? = nil, scroll: Bool = true) {
+        let r = GridRange(r0: max(0, r.r0), c0: max(0, r.c0), r1: min(r.r1, Sheet.maxRows - 1), c1: min(r.c1, Sheet.maxCols - 1))
         selection = expandForMerges(r, geo)
         active = a ?? CellRef(row: r.r0, col: r.c0)
         cursor = CellRef(row: r.r1, col: r.c1)
-        ensureVisible(active)
+        if scroll { ensureVisible(active) }
         needsDisplay = true
         notifySelection()
     }
@@ -587,10 +614,17 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private func advance(_ dr: Int, _ dc: Int) {
         let s = selection
         guard !s.isSingle, mergeAt(active, geo) != s else { move(dr, dc); return }
-        var r = active.row + dr, c = active.col + dc
-        if r > s.r1 { r = s.r0; c += 1 } else if r < s.r0 { r = s.r1; c -= 1 }
-        if c > s.c1 { c = s.c0; r = dr == 0 ? r + 1 : r } else if c < s.c0 { c = s.c1; r = dr == 0 ? r - 1 : r }
-        if r > s.r1 { r = s.r0 } else if r < s.r0 { r = s.r1 }
+        let g = geo
+        var r = active.row, c = active.col
+        for _ in 0..<min(s.cellCount, 100_000) {
+            r += dr; c += dc
+            if r > s.r1 { r = s.r0; c += 1 } else if r < s.r0 { r = s.r1; c -= 1 }
+            if c > s.c1 { c = s.c0; r = dr == 0 ? r + 1 : r } else if c < s.c0 { c = s.c1; r = dr == 0 ? r - 1 : r }
+            if r > s.r1 { r = s.r0 } else if r < s.r0 { r = s.r1 }
+            if g.rows.isHidden(r) || g.cols.isHidden(c) { continue }
+            if let m = mergeAt(CellRef(row: r, col: c), g), m.r0 != r || m.c0 != c { continue }
+            break
+        }
         active = CellRef(row: r, col: c)
         ensureVisible(active)
         needsDisplay = true
@@ -677,7 +711,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             addCursorRect(scaled(CGRect(x: right - 4, y: 0, width: 8, height: headerH)), cursor: .resizeLeftRight)
         }
         if g.fc > 0 {
-            for c in 0..<g.fc { addCursorRect(scaled(CGRect(x: x(c, g) + g.cols.size(c) - 4, y: 0, width: 8, height: headerH)), cursor: .resizeLeftRight) }
+            for c in 0...min(g.fc - 1, g.cols.index(at: max(0, viewSize.width - headerW))) { addCursorRect(scaled(CGRect(x: x(c, g) + g.cols.size(c) - 4, y: 0, width: 8, height: headerH)), cursor: .resizeLeftRight) }
         }
         for r in scrolledRows(g) {
             let bottom = y(r, g) + g.rows.size(r)
@@ -878,13 +912,13 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if isEditing { return nil }
         if p.y < headerH && p.x > headerW {
             if !(selection.isFullColumns && c.col >= selection.c0 && c.col <= selection.c1) {
-                select(range: GridRange(r0: 0, c0: c.col, r1: Sheet.maxRows - 1, c1: c.col), active: CellRef(row: 0, col: c.col))
+                select(range: GridRange(r0: 0, c0: c.col, r1: Sheet.maxRows - 1, c1: c.col), active: CellRef(row: 0, col: c.col), scroll: false)
             }
             return Menus.columnMenu()
         }
         if p.x < headerW && p.y > headerH {
             if !(selection.isFullRows && c.row >= selection.r0 && c.row <= selection.r1) {
-                select(range: GridRange(r0: c.row, c0: 0, r1: c.row, c1: Sheet.maxCols - 1), active: CellRef(row: c.row, col: 0))
+                select(range: GridRange(r0: c.row, c0: 0, r1: c.row, c1: Sheet.maxCols - 1), active: CellRef(row: c.row, col: 0), scroll: false)
             }
             return Menus.rowMenu()
         }
@@ -916,10 +950,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         editField = field
         editTarget = active
         editSheet = sheet
+        editView = (active, cursor, selection, offset)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            guard let self, self.isEditing else { return e }
-            if e.keyCode == 118 { self.cycleReference(); return nil } // F4
-            return e
+            guard let self, e.window === self.window, self.handleEditingKey(e) else { return e }
+            return nil
         }
         delegate?.gridModeChanged(self)
     }
@@ -970,25 +1004,38 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         positionEditor()
     }
 
-    private func finishEditing() {
+    private func finishEditing(restoreFocus: Bool = true) {
         session?.end()
         session = nil
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         let f = editField
         editField = nil
         if let o = overlay { overlay = nil; o.removeFromSuperview() }
-        if f != nil { window?.makeFirstResponder(self) }
+        if f != nil && restoreFocus { window?.makeFirstResponder(self) }
         refHighlights = []
         delegate?.gridModeChanged(self)
         needsDisplay = true
     }
 
-    func commitEditing(move delta: (Int, Int)?, fillSelection: Bool = false) {
+    /// Back to the sheet where editing started, with its selection and scroll position.
+    private func returnToEditSheet(_ s: Int) {
+        guard sheet != s else { return }
+        let v = editView
+        sheet = s
+        if let v { active = v.active; cursor = v.cursor; selection = v.sel; setOffset(v.offset); needsDisplay = true }
+    }
+
+    func commitEditing(move delta: (Int, Int)?, fillSelection: Bool = false, restoreFocus: Bool = true) {
         guard let f = editField else { return }
         let text = (f.currentEditor()?.string) ?? f.stringValue
         let target = editTarget, targetSheet = editSheet
-        finishEditing()
-        if sheet != targetSheet { sheet = targetSheet }
+        finishEditing(restoreFocus: restoreFocus)
+        returnToEditSheet(targetSheet)
+        // Unchanged text is not an edit (no undo step, document stays clean).
+        if !fillSelection && text == book.input(sheet: sheet, row: target.row, col: target.col) {
+            if let d = delta { advance(d.0, d.1) } else { notifySelection() }
+            return
+        }
         if fillSelection && !selection.isSingle {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
             fill(from: GridRange(target, target), into: selection)
@@ -1010,7 +1057,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         guard isEditing else { return }
         let targetSheet = editSheet
         finishEditing()
-        if sheet != targetSheet { sheet = targetSheet }
+        returnToEditSheet(targetSheet)
         notifySelection()
     }
 
@@ -1025,7 +1072,19 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         }
         s.insertReference(ref)
         if let o = overlay { delegate?.gridEditingTextChanged(self, text: o.stringValue); positionEditor() }
-        ensureVisible(c)
+        if !(r.isFullColumns || r.isFullRows) { ensureVisible(c) }
+        delegate?.gridModeChanged(self)
+    }
+
+    /// Keys the field editor has no command for while editing: F4 (cycle $) and ⌘↩ (fill selection).
+    func handleEditingKey(_ e: NSEvent) -> Bool {
+        guard isEditing else { return false }
+        if e.keyCode == 118 { cycleReference(); return true }
+        if (e.keyCode == 36 || e.keyCode == 76) && e.modifierFlags.contains(.command) {
+            commitEditing(move: nil, fillSelection: true)
+            return true
+        }
+        return false
     }
 
     private func cycleReference() {
@@ -1041,12 +1100,13 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         guard control === editField, let s = session else { return false }
         if s.handle(sel) { return true }
-        let cmd = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
-        let opt = NSApp.currentEvent?.modifierFlags.contains(.option) ?? false
+        let cmd = currentModifiers.contains(.command)
+        let opt = currentModifiers.contains(.option)
         switch sel {
         case #selector(NSResponder.insertNewline(_:)):
             if opt && !cmd { textView.insertNewlineIgnoringFieldEditor(nil); return true } // ⌥↩ new line in cell
-            commitEditing(move: cmd ? nil : (1, 0), fillSelection: cmd)
+            let shift = currentModifiers.contains(.shift)
+            commitEditing(move: cmd ? nil : (shift ? -1 : 1, 0), fillSelection: cmd)
             return true
         case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
             textView.insertNewlineIgnoringFieldEditor(nil); return true
@@ -1083,6 +1143,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     func controlTextDidChange(_ n: Notification) {
         guard let f = n.object as? NSTextField, f === editField else { return }
         session?.textChanged()
+        delegate?.gridModeChanged(self)
         if f === overlay {
             positionEditor()
             delegate?.gridEditingTextChanged(self, text: f.stringValue)
@@ -1095,7 +1156,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     func controlTextDidEndEditing(_ n: Notification) {
         guard let f = n.object as? NSTextField, f === editField else { return }
-        commitEditing(move: nil)
+        if f === overlay, let e = NSApp.currentEvent, e.type == .leftMouseDown, e.window === window,
+           let bar = window?.contentView?.hitTest(e.locationInWindow) as? FormulaBarField {
+            // Clicking the formula bar continues the same edit there instead of committing a half formula.
+            let text = f.stringValue
+            finishEditing(restoreFocus: false)
+            bar.stringValue = text
+            return
+        }
+        commitEditing(move: nil, restoreFocus: false)
     }
 
     // MARK: - Commands
@@ -1114,11 +1183,14 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         contentChanged()
     }
 
-    @objc func undo(_ sender: Any?) { commitIfEditing(); book.undo(); contentChanged() }
-    @objc func redo(_ sender: Any?) { commitIfEditing(); book.redo(); contentChanged() }
+    @objc func undo(_ sender: Any?) {
+        if isEditing { cancelEditing(); return }   // like Excel: undo while typing discards the entry
+        book.undo(); clearFilterState(); contentChanged()
+    }
+    @objc func redo(_ sender: Any?) { if isEditing { return }; book.redo(); clearFilterState(); contentChanged() }
     @objc func delete(_ sender: Any?) { clearSelection() }
-    @objc func clearAll(_ sender: Any?) { book.clear(sheet: sheet, selection); book.clearFormats(sheet: sheet, selection); contentChanged() }
-    @objc func clearFormatsAction(_ sender: Any?) { book.clearFormats(sheet: sheet, selection); contentChanged() }
+    @objc func clearAll(_ sender: Any?) { commitIfEditing(); book.clear(sheet: sheet, selection); book.clearFormats(sheet: sheet, selection); contentChanged() }
+    @objc func clearFormatsAction(_ sender: Any?) { commitIfEditing(); book.clearFormats(sheet: sheet, selection); contentChanged() }
 
     @objc override func selectAll(_ sender: Any?) {
         // ⌘A once selects the data region, twice the whole sheet (Excel).
@@ -1140,6 +1212,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         pb.declareTypes([.string, GridView.pasteboardType], owner: nil)
         pb.setString(text, forType: .string)
         pb.setString("\(token)", forType: GridView.pasteboardType)
+        let g = geo, s = selection
+        copied = (token, max(s.r0, min(s.r1, g.maxRow)) - s.r0 + 1, max(s.c0, min(s.c1, g.maxCol)) - s.c0 + 1)
         cutRange = cut ? (sheet, selection) : nil
         needsDisplay = true
     }
@@ -1150,8 +1224,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if let t = pb.string(forType: GridView.pasteboardType), let token = UInt64(t),
            let text = pb.string(forType: .string) {
             let lines = text.components(separatedBy: "\n")
-            let h = max(1, lines.count), w = max(1, lines.map { $0.components(separatedBy: "\t").count }.max() ?? 1)
-            let target = selection.isSingle ? GridRange(r0: active.row, c0: active.col, r1: active.row + h - 1, c1: active.col + w - 1) : selection
+            var h = max(1, lines.count), w = max(1, lines.map { $0.components(separatedBy: "\t").count }.max() ?? 1)
+            if let c = copied, c.token == token { h = c.rows; w = c.cols }
+            let anchor = selection.isSingle ? active : CellRef(row: selection.r0, col: selection.c0)
+            let target = GridRange(r0: anchor.row, c0: anchor.col, r1: min(Sheet.maxRows - 1, anchor.row + h - 1), c1: min(Sheet.maxCols - 1, anchor.col + w - 1))
             if book.pasteInternal(sheet: sheet, target, token: token, cut: cutRange != nil) {
                 cutRange = nil
                 select(range: target, active: active)
@@ -1177,31 +1253,55 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     // Rows / columns
     @objc func insertRows(_ sender: Any?) {
+        commitIfEditing(); clearFilterState()
         book.insertRows(sheet: sheet, at: selection.r0, count: selection.isFullColumns ? 1 : selection.rows); contentChanged()
     }
     @objc func insertColumns(_ sender: Any?) {
+        commitIfEditing(); clearFilterState()
         book.insertCols(sheet: sheet, at: selection.c0, count: selection.isFullRows ? 1 : selection.cols); contentChanged()
     }
     @objc func deleteRows(_ sender: Any?) {
+        commitIfEditing(); clearFilterState()
         guard !selection.isFullColumns else { NSSound.beep(); return }
         book.deleteRows(sheet: sheet, at: selection.r0, count: selection.rows)
         select(CellRef(row: selection.r0, col: active.col)); contentChanged()
     }
     @objc func deleteColumns(_ sender: Any?) {
+        commitIfEditing(); clearFilterState()
         guard !selection.isFullRows else { NSSound.beep(); return }
         book.deleteCols(sheet: sheet, at: selection.c0, count: selection.cols)
         select(CellRef(row: active.row, col: selection.c0)); contentChanged()
     }
-    @objc func hideRows(_ sender: Any?) { book.setHidden(sheet: sheet, rows: true, selection.r0, selection.r1, hidden: true); contentChanged() }
-    @objc func unhideRows(_ sender: Any?) {
-        book.setHidden(sheet: sheet, rows: true, max(0, selection.r0 - 1), selection.r1 + 1, hidden: false); contentChanged()
+    @objc func hideRows(_ sender: Any?) {
+        commitIfEditing()
+        guard !selection.isFullColumns else { NSSound.beep(); return }
+        book.setHidden(sheet: sheet, rows: true, selection.r0, selection.r1, hidden: true); contentChanged()
     }
-    @objc func hideColumns(_ sender: Any?) { book.setHidden(sheet: sheet, rows: false, selection.c0, selection.c1, hidden: true); contentChanged() }
+    /// Unhides only rows that are actually hidden around the selection (fast even after Select All).
+    @objc func unhideRows(_ sender: Any?) {
+        commitIfEditing()
+        let lo = max(0, selection.r0 - 1), hi = min(Sheet.maxRows - 1, selection.r1 + 1)
+        for e in book.layout(sheet: sheet).rows where e.2 && e.0 >= lo && e.0 <= hi {
+            book.setHidden(sheet: sheet, rows: true, e.0, e.0, hidden: false)
+        }
+        contentChanged()
+    }
+    @objc func hideColumns(_ sender: Any?) {
+        commitIfEditing()
+        guard !selection.isFullRows else { NSSound.beep(); return }
+        book.setHidden(sheet: sheet, rows: false, selection.c0, selection.c1, hidden: true); contentChanged()
+    }
     @objc func unhideColumns(_ sender: Any?) {
-        book.setHidden(sheet: sheet, rows: false, max(0, selection.c0 - 1), selection.c1 + 1, hidden: false); contentChanged()
+        commitIfEditing()
+        let lo = max(0, selection.c0 - 1), hi = min(Sheet.maxCols - 1, selection.c1 + 1)
+        for e in book.layout(sheet: sheet).cols where e.2 && e.0 >= lo && e.0 <= hi {
+            book.setHidden(sheet: sheet, rows: false, e.0, e.0, hidden: false)
+        }
+        contentChanged()
     }
 
     @objc func columnWidth(_ sender: Any?) {
+        commitIfEditing()
         let g = geo
         askNumber(L("Column width"), value: g.cols.size(selection.c0) / colUnit / 9) { [weak self] v in
             guard let self else { return }
@@ -1210,6 +1310,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         }
     }
     @objc func rowHeight(_ sender: Any?) {
+        commitIfEditing()
         let g = geo
         askNumber(L("Row height"), value: g.rows.size(selection.r0) / rowUnit / 1.5625) { [weak self] v in
             guard let self else { return }
@@ -1222,8 +1323,11 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     func autofitColumns(_ cols: ClosedRange<Int>) {
         let g = geo
         let lastRow = min(g.maxRow, 20_000)
-        let rows = (selection.isFullColumns || selection.isSingle) ? 0...lastRow : selection.r0...min(selection.r1, lastRow)
-        let cells = book.viewport(sheet: sheet, rows: rows, cols: cols.lowerBound...min(cols.upperBound, g.maxCol + 1))
+        let useAll = selection.isFullColumns || selection.isSingle
+        let r0 = useAll ? 0 : selection.r0, r1 = useAll ? lastRow : min(selection.r1, lastRow)
+        let cHi = min(cols.upperBound, g.maxCol)
+        guard r0 <= r1, cols.lowerBound <= cHi else { NSSound.beep(); return }
+        let cells = book.viewport(sheet: sheet, rows: r0...r1, cols: cols.lowerBound...cHi)
         var widths: [Int: CGFloat] = [:]
         for c in cells where !c.text.isEmpty {
             let w = (c.text as NSString).size(withAttributes: painter.attrs(c)).width + 10
@@ -1258,23 +1362,29 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     // Freeze panes
     @objc func freezePanes(_ sender: Any?) {
+        commitIfEditing()
         let g = geo
         if g.fr > 0 || g.fc > 0 { book.setFrozen(sheet: sheet, rows: 0, cols: 0) }
-        else { book.setFrozen(sheet: sheet, rows: active.row, cols: active.col) }
+        else {
+            // Freeze what is above/left of the active cell on screen; refuse panes that would fill the window.
+            guard g.rows.pos(active.row) < (viewSize.height - headerH) * 0.9,
+                  g.cols.pos(active.col) < (viewSize.width - headerW) * 0.9 else { NSSound.beep(); return }
+            book.setFrozen(sheet: sheet, rows: active.row, cols: active.col)
+        }
         offset = .zero
         contentChanged()
     }
-    @objc func freezeTopRow(_ sender: Any?) { book.setFrozen(sheet: sheet, rows: 1, cols: 0); offset = .zero; contentChanged() }
-    @objc func freezeFirstColumn(_ sender: Any?) { book.setFrozen(sheet: sheet, rows: 0, cols: 1); offset = .zero; contentChanged() }
+    @objc func freezeTopRow(_ sender: Any?) { commitIfEditing(); book.setFrozen(sheet: sheet, rows: 1, cols: 0); offset = .zero; contentChanged() }
+    @objc func freezeFirstColumn(_ sender: Any?) { commitIfEditing(); book.setFrozen(sheet: sheet, rows: 0, cols: 1); offset = .zero; contentChanged() }
     @objc func toggleGridlines(_ sender: Any?) { book.setShowGrid(sheet: sheet, !geo.showGrid); contentChanged() }
 
     // Data
-    private func sortRange() -> GridRange {
-        var r = selection.isSingle ? book.currentRegion(sheet: sheet, row: active.row, col: active.col) : selection
+    /// The selection (or the data region around the active cell) clipped to the used range; nil if it holds no data.
+    private func dataRange() -> GridRange? {
+        let s = selection.isSingle ? book.currentRegion(sheet: sheet, row: active.row, col: active.col) : selection
         let g = geo
-        r.r1 = min(r.r1, g.maxRow)
-        r.c1 = min(r.c1, g.maxCol)
-        return r
+        guard s.r0 <= g.maxRow, s.c0 <= g.maxCol else { return nil }
+        return GridRange(r0: s.r0, c0: s.c0, r1: min(s.r1, g.maxRow), c1: min(s.c1, g.maxCol))
     }
     /// A first row of text over a column of numbers is a header (Excel's guess).
     private func hasHeader(_ r: GridRange) -> Bool {
@@ -1290,7 +1400,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     @objc func sortDescending(_ sender: Any?) { sort(false) }
     private func sort(_ asc: Bool) {
         commitIfEditing()
-        var r = sortRange()
+        guard var r = dataRange() else { NSSound.beep(); return }
         if hasHeader(r) { r.r0 += 1 }
         guard r.rows > 1 else { return }
         book.sort(sheet: sheet, r, keyCol: active.col, ascending: asc)
@@ -1333,6 +1443,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     }
 
     @objc func mergeAndCenter(_ sender: Any?) {
+        commitIfEditing()
         if geo.merges.contains(where: { $0.intersects(selection) }) {
             book.merge(sheet: sheet, selection, mode: 0)
         } else {
@@ -1421,7 +1532,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(undo(_:)): return book.canUndo && !isEditing
+        case #selector(undo(_:)): return isEditing || book.canUndo
         case #selector(redo(_:)): return book.canRedo && !isEditing
         case #selector(freezePanes(_:)):
             let g = geo
@@ -1448,6 +1559,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         return CGRect(x: r.maxX - s - 3, y: r.midY - s / 2, width: s, height: s)
     }
 
+    /// Filters are tied to row/column positions: structural edits and undo drop them (rows stay as they are).
+    func clearFilterState() { if filters[sheet] != nil { filters[sheet] = nil; needsDisplay = true } }
+    func clearAllFilters() { filters.removeAll(); needsDisplay = true }
+
     @objc func toggleFilter(_ sender: Any?) {
         commitIfEditing()
         if let f = filters[sheet] {
@@ -1456,10 +1571,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             contentChanged()
             return
         }
-        var r = selection.isSingle ? book.currentRegion(sheet: sheet, row: active.row, col: active.col) : selection
-        r.r1 = min(r.r1, geo.maxRow)
-        r.c1 = min(r.c1, geo.maxCol)
-        guard r.rows >= 2 else { NSSound.beep(); return }
+        guard let r = dataRange(), r.rows >= 2 else { NSSound.beep(); return }
         filters[sheet] = FilterState(range: r)
         needsDisplay = true
         delegate?.gridSelectionChanged(self)
@@ -1507,7 +1619,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private func reapplyFilter() {
         guard let f = filters[sheet], let rows = f.dataRows else { return }
         let active = f.excluded.filter { !$0.value.isEmpty }
-        book.setHidden(sheet: sheet, rows: true, rows.lowerBound, rows.upperBound, hidden: false)
+        for e in book.layout(sheet: sheet).rows where e.2 && rows.contains(e.0) {
+            book.setHidden(sheet: sheet, rows: true, e.0, e.0, hidden: false)
+        }
         if !active.isEmpty {
             let cols = active.keys.min()!...active.keys.max()!
             let values = columnValues(f, cols: cols)

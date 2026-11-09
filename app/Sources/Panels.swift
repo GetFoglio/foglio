@@ -90,7 +90,9 @@ final class FindPanel: NSPanel, NSSearchFieldDelegate {
         let g = c.grid!
         let content = g.book.input(sheet: g.sheet, row: g.active.row, col: g.active.col)
         let opts: String.CompareOptions = matchCase.state == .on ? [] : [.caseInsensitive]
-        if content.range(of: query, options: opts) != nil {
+        let matches = wholeCell.state == .on ? content.compare(query, options: opts) == .orderedSame
+                                             : content.range(of: query, options: opts) != nil
+        if matches {
             let new = wholeCell.state == .on ? replaceField.stringValue
                 : content.replacingOccurrences(of: query, with: replaceField.stringValue, options: opts)
             g.book.setInput(sheet: g.sheet, row: g.active.row, col: g.active.col, new)
@@ -181,6 +183,7 @@ final class FunctionBrowser: NSPanel, NSTableViewDataSource, NSTableViewDelegate
     }
 
     private func moveSel(_ d: Int) {
+        guard !items.isEmpty else { return }
         let r = min(max(0, table.selectedRow + d), items.count - 1)
         table.selectRowIndexes(IndexSet(integer: r), byExtendingSelection: false)
         table.scrollRowToVisible(r)
