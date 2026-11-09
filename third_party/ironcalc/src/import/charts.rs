@@ -39,7 +39,15 @@ fn text_of(node: &XmlNode) -> String {
 }
 
 fn read_xml<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, path: &str) -> Option<XmlNode> {
-    let file = archive.by_name(path).ok()?;
+    // Part names are case-insensitive in OPC (some generators write "Sheet1.xml" for "sheet1.xml").
+    let name = if archive.index_for_name(path).is_some() {
+        path.to_string()
+    } else {
+        (0..archive.len())
+            .filter_map(|i| archive.name_for_index(i).and_then(|r| r.ok()).map(|n| n.to_string()))
+            .find(|n| n.eq_ignore_ascii_case(path))?
+    };
+    let file = archive.by_name(&name).ok()?;
     XmlNode::parse(BufReader::new(file)).ok()
 }
 
