@@ -211,9 +211,8 @@ The app icon is generated in code; to regenerate `assets/icon-1024.png` and
   custom `NSView` grid tuned for fast scrolling over large sheets.
 - **`scripts/`** holds the build, packaging and icon scripts. The build uses plain `cargo` and
   `swiftc`; there is no Xcode project.
-- **`site/`** is the website, [getfoglio.app](https://getfoglio.app): Next.js + TypeScript, exported
-  as static HTML and deployed to GitHub Pages by `.github/workflows/site.yml`
-  (`cd site && npm ci && npm run dev`).
+- The website, [getfoglio.app](https://getfoglio.app), lives in its own repository:
+  [Acid236/foglio-site](https://github.com/Acid236/foglio-site).
 
 ## Contributing
 
