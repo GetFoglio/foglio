@@ -302,6 +302,9 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "barclick": c.focusFormulaBarForTesting()
+            case "sheets": print("SHEETS \(c.grid.book.sheetNames.joined(separator: ",")) current=\(c.grid.sheet)")
+            case "tab": if let i = Int(arg) { c.selectSheetForTesting(i) }
             case "findtext": _ = c.grid.find(arg, flags: 0)
             case "rowhidden":
                 if let r = Int(arg) { print("HIDDEN \(r) \(c.grid.book.layout(sheet: c.grid.sheet).rows.contains { $0.0 == r - 1 && $0.2 })") }

@@ -4,3 +4,4 @@
 build.log
 *.foglio-tmp.xlsx
 .DS_Store
+build-universal.log

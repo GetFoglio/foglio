@@ -751,4 +751,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     }
 
     func windowDidBecomeKey(_ notification: Notification) { syncZoom() }
+
+    // Test hooks (scripts/ui_tests.sh)
+    func focusFormulaBarForTesting() { window?.makeFirstResponder(formulaField) }
+    func selectSheetForTesting(_ i: Int) { switchTo(sheet: i) }
 }

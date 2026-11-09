@@ -33,4 +33,10 @@ run "filter hides rows" "input A1=K;; input A2=x;; input A3=y;; input A4=x;; sel
 run "header selection" "header C;; state;; header 4;; state" "sel=C:C" "sel=4:4"
 run "unchanged commit is not an edit" "input A1=3;; click A1;; key f2;; key return;; key cmd+z;; print A1" "CELL A1 =  |"
 run "sort ascending" "input A1=Nome;; input A2=c;; input A3=a;; input A4=b;; select A1;; bold;; key cmd+a;; sortasc;; print A2;; print A4" "CELL A2 = a | a" "CELL A4 = c | c"
+run "formula bar editing" "click C3;; barclick;; type =1+1;; key return;; print C3" "CELL C3 = 2 | =1+1"
+run "formula bar point mode" "input A1=4;; click C3;; barclick;; type =;; click A1;; type *10;; key return;; print C3" "CELL C3 = 40 | =A1*10"
+run "insert row shifts data" "input A2=x;; input B5==A2;; header 2;; key cmd+shift++;; print A3;; print B6" "CELL A3 = x | x" "| =A3"
+run "add sheet + undo" "key cmd+shift+n;; sheets;; key cmd+z;; sheets" "SHEETS Foglio1,Foglio2 current=1" "SHEETS Foglio1 current=0"
+run "cross-sheet reference" "input A1=5;; key cmd+shift+n;; input A1=1;; click B2;; type =;; tab 0;; click A1;; key return;; print B2" "CELL B2 = 5 | =Foglio1!A1"
+run "merged cell editing" "select B2:D3;; merge;; click C3;; type unito;; key return;; print B2;; state" "CELL B2 = unito | unito" "active=B4"
 exit $fail
