@@ -6,3 +6,4 @@ build.log
 .DS_Store
 build-universal.log
 /third_party/*/target/
+package.log
