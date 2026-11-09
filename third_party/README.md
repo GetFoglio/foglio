@@ -232,6 +232,50 @@ resolving to these copies. Every Foglio change is marked with a
   DrawingML chart schema; Excel 2016 defaults (gap width 219, overlap -27,
   no rounded corners, light gridlines).
 
+### Pictures
+* **Model** (new `ironcalc_base/src/pictures.rs`, fields `Worksheet::pictures`
+  and `Worksheet::images`): `Picture` = name, alt text (`descr`), image key,
+  two-cell anchor (shared `ChartAnchor`), size `cx`/`cy` in EMU, `edit_as`
+  (twoCell / oneCell / absolute), crop (`a:srcRect` l/t/r/b in 1/1000 %),
+  `in_cell` ("Place in Cell": fitted in the cell of `from`, aspect `cx:cy`,
+  1 px margin, written as a two-cell anchor) and `z`. Image bytes live in a
+  per-sheet store keyed by a content hash (FNV-1a 64 + length): identical
+  images are stored once, and undo steps never copy bytes. The store only
+  grows during a session; only images in use are written. Only PNG/JPEG/GIF/
+  BMP headers are read (pixel size); decoding and resampling are left to the
+  app.
+* **Stacking**: `Chart::z` (new field, `#[serde(default)]`) and `Picture::z`
+  share one order (`drawing_order`, `restack_drawing`; new charts and pictures
+  go in front). It is the order of the anchors in the drawing part.
+* **Undo**: `add_picture`, `update_picture`, `delete_picture` push
+  `Diff::SetPictures` (old/new list of the sheet, no recalculation);
+  `restack_drawing` pushes `SetCharts` + `SetPictures` as one step.
+* **Structure**: `displace_charts` (already hooked into row/column insert and
+  delete) also moves pictures (`displace_pictures`): absolute pictures stay,
+  others move with their cells, a two-cell picture whose cells are deleted
+  keeps a minimal size.
+* **xlsx import** (new `ironcalc/src/import/pictures.rs`; the chart reader's
+  loop in `import/charts.rs`, renamed `load_sheet_drawings`, now hands
+  `xdr:pic` anchors to it and records the anchor order): `a:blip/@r:embed`
+  → drawing rels → `xl/media/*` (case-insensitive part names, 64 MB cap),
+  twoCell/oneCell/absolute anchors, `a:srcRect`, `cNvPr/@descr`; anchors
+  inside `mc:AlternateContent` (first choice with an anchor, else the
+  fallback); a two-cell picture inside a single cell becomes an in-cell
+  picture. Excel 365 pictures in cells: `xl/metadata.xml` (XLRICHVALUE value
+  metadata) → `xl/richData/rdrichvalue.xml` + `rdrichvaluestructure.xml`
+  (`_localImage`, `_rvRel:LocalImageIdentifier`, `Text` as alt text) →
+  `richValueRel.xml` + rels → media; cells with a matching `vm` (found by a
+  streaming pass over the sheet part, only when `xl/richData` exists) get an
+  in-cell picture and lose their `#VALUE!` placeholder. Unreadable pictures and
+  other drawing objects (shapes, text boxes, OLE icons) are skipped.
+* **xlsx export** (new `ironcalc/src/export/pictures.rs`; `export/charts.rs`
+  writes the drawing part for sheets with charts *or* pictures): one
+  `xdr:twoCellAnchor editAs="…"` per picture in stacking order with charts,
+  `to` recomputed from the size (one-cell/absolute) or the cell (in-cell),
+  `a:off`/`a:ext`, `a:srcRect`, `picLocks noChangeAspect`; media numbered
+  across the workbook and deduplicated, stored uncompressed; `<Default>`
+  content types for the image extensions; drawing rels `rIdImgN`.
+
 ### Tests added
 * `ironcalc_base/src/test/test_incremental.rs`: targeted tests, randomized
   edit sequences (400 sessions × 60 edits in the default run; 2000 × 120 in

@@ -2,6 +2,7 @@ mod annotations; // Foglio fork: comments, data validation
 mod charts; // Foglio fork: charts
 mod conditional_formatting;
 mod metadata;
+mod pictures; // Foglio fork: pictures
 pub(crate) mod shared_strings;
 mod sheet_data;
 mod styles;

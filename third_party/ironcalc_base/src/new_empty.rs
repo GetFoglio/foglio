@@ -57,6 +57,8 @@ impl<'a> Model<'a> {
             conditional_formatting: vec![],
             links: HashMap::new(),
             charts: vec![], // Foglio fork: charts
+            pictures: vec![], // Foglio fork: pictures
+            images: HashMap::new(), // Foglio fork: pictures
             data_validations: vec![], // Foglio fork: data validation
         }
     }

@@ -645,6 +645,10 @@ impl<'a> UserModel<'a> {
                 Diff::SetCharts {
                     sheet, old_value, ..
                 } => self.apply_charts_diff(*sheet, old_value)?,
+                // Foglio fork: pictures
+                Diff::SetPictures {
+                    sheet, old_value, ..
+                } => self.apply_pictures_diff(*sheet, old_value)?,
                 // Foglio fork: comments, data validation
                 Diff::SetSheetAnnotations {
                     sheet, old_value, ..
@@ -1104,6 +1108,10 @@ impl<'a> UserModel<'a> {
                 Diff::SetCharts {
                     sheet, new_value, ..
                 } => self.apply_charts_diff(*sheet, new_value)?,
+                // Foglio fork: pictures
+                Diff::SetPictures {
+                    sheet, new_value, ..
+                } => self.apply_pictures_diff(*sheet, new_value)?,
                 // Foglio fork: comments, data validation
                 Diff::SetSheetAnnotations {
                     sheet, new_value, ..

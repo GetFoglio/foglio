@@ -5,6 +5,7 @@ mod annotations; // Foglio fork: comments, data validation, tab colour
 mod charts; // Foglio fork: charts
 mod conditional_formatting;
 mod doc_props;
+mod pictures; // Foglio fork: pictures
 mod dxfs_styles;
 mod escape;
 mod shared_strings;

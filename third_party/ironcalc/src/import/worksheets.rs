@@ -956,6 +956,8 @@ pub(super) fn load_sheet<R: Read + std::io::Seek>(
         conditional_formatting,
         links,
         charts: vec![], // Foglio fork: charts, filled in by load_sheets
+        pictures: vec![], // Foglio fork: pictures, filled in by load_sheets
+        images: HashMap::new(), // Foglio fork: pictures
         data_validations: super::annotations::load_data_validations(ws), // Foglio fork
     })
 }
@@ -993,6 +995,7 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
     let mut sheets = Vec::new();
 
     let defined_names = workbook.get_defined_names_with_scope();
+    let rich_images = super::pictures::RichValueImages::load(archive); // Foglio fork: pictures in cells
 
     for sheet in &workbook.worksheets {
         let sheet_name = &sheet.name;
@@ -1027,7 +1030,9 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
                 theme,
                 dxfs,
             )?;
-            s.charts = super::charts::load_sheet_charts(archive, &path, &s); // Foglio fork: charts
+            // Foglio fork: charts and pictures (drawing part), pictures in cells (rich values)
+            super::charts::load_sheet_drawings(archive, &path, &mut s);
+            rich_images.add_to_sheet(archive, &path, &mut s);
             sheets.push(s);
         }
     }

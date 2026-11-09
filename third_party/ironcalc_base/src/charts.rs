@@ -175,6 +175,10 @@ pub struct Chart {
     pub value_axis_title: Option<String>,
     /// Placement on the sheet
     pub anchor: ChartAnchor,
+    /// Foglio fork (pictures): stacking order among the drawing objects of the
+    /// sheet, shared with pictures (see pictures.rs); higher is in front
+    #[serde(default)]
+    pub z: i32,
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +438,10 @@ pub(crate) fn displace_charts(model: &mut Model, sheet: u32, rows: bool, at: i32
                 }
             }
         }
+    }
+    // Pictures move with the cells too (see pictures.rs).
+    if let Some(ws) = model.workbook.worksheets.get_mut(sheet as usize) {
+        crate::pictures::displace_pictures(ws, rows, at, count);
     }
 }
 
@@ -712,6 +720,8 @@ impl UserModel<'_> {
                 .sum::<usize>();
             chart.name = format!("Chart {}", n + 1);
         }
+        // In front of the other charts and pictures (see pictures.rs).
+        chart.z = crate::pictures::next_z(self.model.workbook.worksheet(sheet)?);
         charts.push(chart);
         let index = charts.len() - 1;
         self.set_charts(sheet, charts)?;

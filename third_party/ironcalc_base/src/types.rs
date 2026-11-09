@@ -239,6 +239,10 @@ pub struct Worksheet {
     pub links: HashMap<(i32, i32), Link>,
     /// Foglio fork: charts placed on the sheet (see charts.rs)
     pub charts: Vec<crate::charts::Chart>,
+    /// Foglio fork: pictures placed on the sheet (see pictures.rs)
+    pub pictures: Vec<crate::pictures::Picture>,
+    /// Foglio fork: image bytes of the pictures, keyed by content hash (see pictures.rs)
+    pub images: HashMap<String, Vec<u8>>,
     /// Foglio fork: data validation rules (see data_validation.rs)
     pub data_validations: Vec<crate::data_validation::DataValidation>,
 }

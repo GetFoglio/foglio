@@ -3,6 +3,8 @@
 //! worksheet rels --drawing--> xl/drawings/drawingN.xml (anchors)
 //!   drawing rels --chart--> xl/charts/chartM.xml (DrawingML chart)
 //!
+//! Pictures in the same drawing part are read by pictures.rs.
+//!
 //! Tolerant by design: anything unexpected skips that chart (or that part of
 //! it) and never fails the load of the workbook.
 
@@ -16,13 +18,13 @@ use ironcalc_base::types::Worksheet;
 
 use super::xml::XmlNode;
 
-const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(super) const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-fn child<'a>(node: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
+pub(super) fn child<'a>(node: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
     node.children().find(|n| n.has_tag_name(name))
 }
 
-fn path_child<'a>(node: &'a XmlNode, path: &[&str]) -> Option<&'a XmlNode> {
+pub(super) fn path_child<'a>(node: &'a XmlNode, path: &[&str]) -> Option<&'a XmlNode> {
     let mut n = node;
     for p in path {
         n = child(n, p)?;
@@ -38,7 +40,7 @@ fn text_of(node: &XmlNode) -> String {
     node.text().unwrap_or("").to_string()
 }
 
-fn read_xml<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, path: &str) -> Option<XmlNode> {
+pub(super) fn read_xml<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, path: &str) -> Option<XmlNode> {
     // Part names are case-insensitive in OPC (some generators write "Sheet1.xml" for "sheet1.xml").
     let name = if archive.index_for_name(path).is_some() {
         path.to_string()
@@ -79,7 +81,7 @@ fn resolve(part: &str, target: &str) -> String {
 }
 
 /// Relationship id -> (type, resolved target)
-fn load_rels<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, part: &str) -> HashMap<String, (String, String)> {
+pub(super) fn load_rels<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, part: &str) -> HashMap<String, (String, String)> {
     let mut out = HashMap::new();
     if let Some(doc) = read_xml(archive, &rels_path(part)) {
         for rel in doc.children().filter(|n| n.has_tag_name("Relationship")) {
@@ -94,7 +96,7 @@ fn load_rels<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, part: &str) -> Ha
     out
 }
 
-fn anchor_point(node: &XmlNode) -> Option<AnchorPoint> {
+pub(super) fn anchor_point(node: &XmlNode) -> Option<AnchorPoint> {
     let num = |name: &str| -> Option<i64> { child(node, name)?.text()?.trim().parse::<i64>().ok() };
     Some(AnchorPoint {
         row: num("row")? as i32 + 1,
@@ -176,7 +178,7 @@ fn axis_title(plot_area: &XmlNode, ax_id: Option<&str>) -> Option<String> {
 }
 
 /// Parses a chart part. `None` if it holds nothing Foglio can draw.
-fn parse_chart(doc: &XmlNode, name: String, anchor: ChartAnchor) -> Option<Chart> {
+fn parse_chart(doc: &XmlNode, name: String, anchor: ChartAnchor, z: i32) -> Option<Chart> {
     let chart = child(doc, "chart")?;
     let plot_area = child(chart, "plotArea")?;
     let mut kind = None;
@@ -303,6 +305,7 @@ fn parse_chart(doc: &XmlNode, name: String, anchor: ChartAnchor) -> Option<Chart
         category_axis_title: cat_title,
         value_axis_title: val_title,
         anchor,
+        z,
     })
 }
 
@@ -337,24 +340,50 @@ fn anchor_of(ws: &Worksheet, anchor: &XmlNode) -> Option<ChartAnchor> {
     }
 }
 
-/// The charts of the worksheet `ws` stored at `sheet_path` (e.g. "xl/worksheets/sheet1.xml").
-pub(super) fn load_sheet_charts<R: Read + Seek>(
+/// The charts and pictures of the worksheet `ws` stored at `sheet_path`
+/// (e.g. "xl/worksheets/sheet1.xml"), in `ws.charts` / `ws.pictures` (Foglio
+/// fork: pictures share the drawing part with charts, see pictures.rs). The
+/// position of an anchor in the drawing is the object's stacking order (`z`).
+pub(super) fn load_sheet_drawings<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     sheet_path: &str,
-    ws: &Worksheet,
-) -> Vec<Chart> {
-    let mut charts = Vec::new();
+    ws: &mut Worksheet,
+) {
     let sheet_rels = load_rels(archive, sheet_path);
-    let mut drawings: Vec<&String> = sheet_rels
+    let mut drawings: Vec<String> = sheet_rels
         .iter()
         .filter(|(_, (t, _))| t.ends_with("/drawing"))
-        .map(|(_, (_, target))| target)
+        .map(|(_, (_, target))| target.clone())
         .collect();
     drawings.sort();
+    let mut z = -1;
     for drawing_path in drawings {
-        let Some(drawing) = read_xml(archive, drawing_path) else { continue };
-        let drawing_rels = load_rels(archive, drawing_path);
-        for anchor in drawing.children() {
+        let Some(drawing) = read_xml(archive, &drawing_path) else { continue };
+        let drawing_rels = load_rels(archive, &drawing_path);
+        // mc:AlternateContent: the anchor of the first choice that has one, else the fallback.
+        let anchors: Vec<&XmlNode> = drawing
+            .children()
+            .flat_map(|n| -> Vec<&XmlNode> {
+                if !n.has_tag_name("AlternateContent") {
+                    return vec![n];
+                }
+                let is_anchor = |a: &&XmlNode| a.tag_name().ends_with("Anchor");
+                n.children()
+                    .filter(|c| c.has_tag_name("Choice"))
+                    .chain(n.children().filter(|c| c.has_tag_name("Fallback")))
+                    .map(|c| c.children().filter(is_anchor).collect::<Vec<_>>())
+                    .find(|v| !v.is_empty())
+                    .unwrap_or_default()
+            })
+            .collect();
+        for anchor in anchors {
+            z += 1;
+            if child(anchor, "pic").is_some() {
+                if let Some(p) = super::pictures::parse_picture(archive, ws, anchor, &drawing_rels, z) {
+                    ws.pictures.push(p);
+                }
+                continue;
+            }
             let Some(chart_anchor) = anchor_of(ws, anchor) else { continue };
             let Some(frame) = child(anchor, "graphicFrame") else { continue };
             let name = path_child(frame, &["nvGraphicFramePr", "cNvPr"])
@@ -368,12 +397,11 @@ pub(super) fn load_sheet_charts<R: Read + Seek>(
                 continue;
             }
             let Some(doc) = read_xml(archive, chart_path) else { continue };
-            if let Some(c) = parse_chart(&doc, name, chart_anchor) {
-                charts.push(c);
+            if let Some(c) = parse_chart(&doc, name, chart_anchor, z) {
+                ws.charts.push(c);
             }
         }
     }
-    charts
 }
 
 #[cfg(test)]

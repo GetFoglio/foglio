@@ -1,6 +1,6 @@
 //! Foglio fork: writes the charts of the workbook.
 //!
-//! For every sheet with charts:
+//! For every sheet with charts or pictures (Foglio fork: pictures, see pictures.rs):
 //! * `xl/drawings/drawing{S}.xml` (S = sheet number) with one
 //!   `xdr:twoCellAnchor` per chart, and its rels pointing to the charts,
 //! * `xl/charts/chart{N}.xml` (N numbered across the workbook),
@@ -17,11 +17,13 @@ use std::io::{Seek, Write};
 use ironcalc_base::{
     cell::CellValue,
     charts::{Chart, ChartKind, ChartRef, ChartSeries, LegendPosition},
+    pictures::{drawing_order, DrawingObject},
     types::Worksheet,
     Model,
 };
 
 use super::escape::escape_xml;
+use super::pictures;
 use super::xml_constants::XML_DECLARATION;
 use crate::error::XlsxError;
 
@@ -47,12 +49,17 @@ fn chart_numbers(model: &Model) -> Vec<(usize, usize, usize)> {
     out
 }
 
-/// `[Content_Types].xml` overrides for drawings and charts.
+/// Foglio fork (pictures): a sheet has a drawing part if it has charts or pictures.
+fn has_drawing(ws: &Worksheet) -> bool {
+    !ws.charts.is_empty() || ws.pictures.iter().any(|p| pictures::is_exportable(ws, p))
+}
+
+/// `[Content_Types].xml` entries for drawings, charts and images.
 pub(crate) fn content_types(workbook: &ironcalc_base::types::Workbook) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out = pictures::Media::of(workbook).content_types();
     let mut n = 0;
     for (s, ws) in workbook.worksheets.iter().enumerate() {
-        if ws.charts.is_empty() {
+        if !has_drawing(ws) {
             continue;
         }
         out.push(format!(
@@ -69,9 +76,9 @@ pub(crate) fn content_types(workbook: &ironcalc_base::types::Workbook) -> Vec<St
     out
 }
 
-/// `<drawing r:id="..."/>` for the worksheet part, or "" without charts.
+/// `<drawing r:id="..."/>` for the worksheet part, or "" without charts and pictures.
 pub(crate) fn drawing_element(worksheet: &Worksheet) -> String {
-    if worksheet.charts.is_empty() {
+    if !has_drawing(worksheet) {
         String::new()
     } else {
         format!(r#"<drawing r:id="{DRAWING_REL_ID}"/>"#)
@@ -80,7 +87,7 @@ pub(crate) fn drawing_element(worksheet: &Worksheet) -> String {
 
 /// Adds the drawing relationship to the sheet rels (creating them if needed).
 pub(crate) fn merge_sheet_rels(rels: Option<String>, sheet_index: usize, worksheet: &Worksheet) -> Option<String> {
-    if worksheet.charts.is_empty() {
+    if !has_drawing(worksheet) {
         return rels;
     }
     let rel = format!(
@@ -96,38 +103,52 @@ pub(crate) fn merge_sheet_rels(rels: Option<String>, sheet_index: usize, workshe
     })
 }
 
-/// Writes the drawing and chart parts.
+/// Writes the drawing, chart and media parts.
 pub(crate) fn write_parts<W: Write + Seek>(
     zip: &mut zip::ZipWriter<W>,
     model: &Model,
     options: zip::write::SimpleFileOptions,
 ) -> Result<(), XlsxError> {
-    let numbers = chart_numbers(model);
-    if numbers.is_empty() {
+    let workbook = &model.workbook;
+    if !workbook.worksheets.iter().any(has_drawing) {
         return Ok(());
     }
+    let numbers = chart_numbers(model);
+    let media = pictures::Media::of(workbook);
     zip.add_directory("xl/drawings", options)?;
     zip.add_directory("xl/drawings/_rels", options)?;
-    zip.add_directory("xl/charts", options)?;
-    for (s, ws) in model.workbook.worksheets.iter().enumerate() {
-        if ws.charts.is_empty() {
+    if !numbers.is_empty() {
+        zip.add_directory("xl/charts", options)?;
+    }
+    for (s, ws) in workbook.worksheets.iter().enumerate() {
+        if !has_drawing(ws) {
             continue;
         }
         let mine: Vec<(usize, usize)> = numbers.iter().filter(|(si, _, _)| *si == s).map(|(_, i, n)| (*i, *n)).collect();
         zip.start_file(format!("xl/drawings/drawing{}.xml", s + 1), options)?;
-        zip.write_all(drawing_xml(ws, &mine).as_bytes())?;
+        zip.write_all(drawing_xml(ws, &mine, &media).as_bytes())?;
         zip.start_file(format!("xl/drawings/_rels/drawing{}.xml.rels", s + 1), options)?;
-        zip.write_all(drawing_rels_xml(&mine).as_bytes())?;
+        zip.write_all(drawing_rels_xml(ws, &mine, &media).as_bytes())?;
         for (i, n) in mine {
             zip.start_file(format!("xl/charts/chart{n}.xml"), options)?;
             zip.write_all(chart_xml(model, &ws.charts[i]).as_bytes())?;
         }
     }
+    // Images: already compressed, stored as they are.
+    if !media.list.is_empty() {
+        zip.add_directory("xl/media", options)?;
+        let stored = options.compression_method(zip::CompressionMethod::Stored);
+        for (key, n, ext) in &media.list {
+            let Some(bytes) = workbook.worksheets.iter().find_map(|w| w.images.get(key)) else { continue };
+            zip.start_file(format!("xl/media/image{n}.{ext}"), stored)?;
+            zip.write_all(bytes)?;
+        }
+    }
     Ok(())
 }
 
-fn drawing_rels_xml(charts: &[(usize, usize)]) -> String {
-    let rels: String = charts
+fn drawing_rels_xml(ws: &Worksheet, charts: &[(usize, usize)], media: &pictures::Media) -> String {
+    let mut rels: String = charts
         .iter()
         .map(|(i, n)| {
             format!(
@@ -136,35 +157,57 @@ fn drawing_rels_xml(charts: &[(usize, usize)]) -> String {
             )
         })
         .collect();
+    // One relationship per image (pictures showing the same image share it).
+    let mut images: Vec<(usize, &str)> = ws.pictures.iter().filter_map(|p| media.get(&p.image)).collect();
+    images.sort();
+    images.dedup();
+    for (n, ext) in images {
+        rels.push_str(&pictures::image_rel_xml(n, ext));
+    }
     format!(
         r#"{XML_DECLARATION}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#
     )
 }
 
-fn drawing_xml(ws: &Worksheet, charts: &[(usize, usize)]) -> String {
+fn chart_anchor_xml(chart: &Chart, id: usize, rel: usize) -> String {
+    let a = &chart.anchor;
+    let point = |tag: &str, p: &ironcalc_base::charts::AnchorPoint| {
+        format!(
+            "<xdr:{tag}><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:{tag}>",
+            (p.column - 1).max(0),
+            p.column_offset.max(0),
+            (p.row - 1).max(0),
+            p.row_offset.max(0)
+        )
+    };
+    let name = if chart.name.is_empty() { format!("Chart {id}") } else { chart.name.clone() };
+    format!(
+        r#"<xdr:twoCellAnchor>{}{}<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="{id}" name="{}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="{NS_C}"><c:chart xmlns:c="{NS_C}" xmlns:r="{NS_R}" r:id="rId{rel}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>"#,
+        point("from", &a.from),
+        point("to", &a.to),
+        escape_xml(&name),
+    )
+}
+
+/// The drawing part: charts and pictures from back to front (Foglio fork:
+/// pictures, see pictures.rs and `ironcalc_base::pictures::drawing_order`).
+fn drawing_xml(ws: &Worksheet, charts: &[(usize, usize)], media: &pictures::Media) -> String {
     let mut anchors = String::new();
-    for (k, (i, _)) in charts.iter().enumerate() {
-        let chart = &ws.charts[*i];
-        let a = &chart.anchor;
-        let point = |tag: &str, p: &ironcalc_base::charts::AnchorPoint| {
-            format!(
-                "<xdr:{tag}><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:{tag}>",
-                (p.column - 1).max(0),
-                p.column_offset.max(0),
-                (p.row - 1).max(0),
-                p.row_offset.max(0)
-            )
-        };
-        let name = if chart.name.is_empty() { format!("Chart {}", k + 1) } else { chart.name.clone() };
-        anchors.push_str(&format!(
-            r#"<xdr:twoCellAnchor>{}{}<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="{}" name="{}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic><a:graphicData uri="{NS_C}"><c:chart xmlns:c="{NS_C}" xmlns:r="{NS_R}" r:id="rId{}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>"#,
-            point("from", &a.from),
-            point("to", &a.to),
-            k + 2,
-            escape_xml(&name),
-            i + 1
-        ));
+    for (k, object) in drawing_order(ws).into_iter().enumerate() {
+        let id = k + 2;
+        match object {
+            DrawingObject::Chart(i) => {
+                if charts.iter().any(|(ci, _)| *ci == i) {
+                    anchors.push_str(&chart_anchor_xml(&ws.charts[i], id, i + 1));
+                }
+            }
+            DrawingObject::Picture(i) => {
+                if let Some(xml) = pictures::anchor_xml(ws, &ws.pictures[i], id, media) {
+                    anchors.push_str(&xml);
+                }
+            }
+        }
     }
     format!(r#"{XML_DECLARATION}
 <xdr:wsDr xmlns:xdr="{NS_XDR}" xmlns:a="{NS_A}">{anchors}</xdr:wsDr>"#)
