@@ -315,6 +315,12 @@ pub(crate) enum Diff {
         old_value: Vec<MergedCell>,
         new_value: Vec<MergedCell>,
     },
+    /// Foglio fork: sets the full list of charts of a sheet (see charts.rs).
+    SetCharts {
+        sheet: u32,
+        old_value: Vec<crate::charts::Chart>,
+        new_value: Vec<crate::charts::Chart>,
+    },
     /// Foglio fork: sets the comments and data validation rules of a sheet
     /// (see user_model/annotations.rs). Like `SetMergedCells`, structural
     /// actions push it with `old_value == new_value` so that undo restores them.

@@ -159,6 +159,38 @@ resolving to these copies. Every Foglio change is marked with a
   32/255 limits, rules without their formulas skipped), `<sheetPr><tabColor>`
   (upstream imported the tab colour but did not write it).
 
+### Charts
+* **Model** (new `ironcalc_base/src/charts.rs`, field `Worksheet::charts`):
+  `Chart` = name, kind (clustered/stacked column and bar, line, line with
+  markers, pie, doughnut, area, stacked area, scatter), title, legend
+  position, axis titles, series (name ref or literal, categories/X ref,
+  values ref, colour) and a two-cell anchor (cell + EMU offsets, like
+  `xdr:twoCellAnchor`). References are sheet-qualified absolute A1 strings
+  (`Sheet1!$B$2:$B$9`), exactly what `<c:f>` holds. `Model::get_chart_data`
+  evaluates them for drawing (formatted category text, numbers; hidden rows
+  and columns skipped like Excel's default).
+* **Undo**: `UserModel::add_chart`, `update_chart`, `delete_chart` push
+  `Diff::SetCharts` (whole list of the sheet, old/new); no recalculation.
+* **Structure**: inserting/deleting rows or columns moves the charts of the
+  sheet and shifts every series reference into it (hooks next to
+  `displace_merged_cells` in `actions.rs`; a fully deleted range becomes
+  `Sheet!#REF!`); renaming a sheet renames it in the references
+  (`new_empty.rs::rename_sheet_by_index`). Moving rows/columns
+  (`move_*_action`) does not touch charts.
+* **xlsx import** (new `ironcalc/src/import/charts.rs`, called from
+  `load_sheets`): sheet rels → `xl/drawings/drawingN.xml` (two-cell,
+  one-cell and absolute anchors) → drawing rels → `xl/charts/chartN.xml`.
+  bar/bar3D, line/line3D/stock/radar (as line), pie/pie3D/ofPie, doughnut,
+  area/area3D, scatter/bubble (as scatter), surface (as column); combination
+  charts keep every series with the first group's type. Anything unreadable
+  is skipped without failing the load.
+* **xlsx export** (new `ironcalc/src/export/charts.rs`): drawing part, chart
+  parts with formula references plus value caches, drawing rels, sheet rel
+  `rIdFoglioDrawing1`, `<drawing>` in the worksheet (after `<hyperlinks>`,
+  before `<legacyDrawing>`), content types. Element order follows the
+  DrawingML chart schema; Excel 2016 defaults (gap width 219, overlap -27,
+  no rounded corners, light gridlines).
+
 ### Tests added
 * `ironcalc_base/src/test/test_incremental.rs`: targeted tests, randomized
   edit sequences (400 sessions × 60 edits in the default run; 2000 × 120 in

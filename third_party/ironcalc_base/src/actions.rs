@@ -660,6 +660,7 @@ impl<'a> Model<'a> {
             }
         });
 
+        crate::charts::displace_charts(self, sheet, false, column, column_count); // Foglio fork: charts
         // Merged ranges shift right or grow when columns are inserted inside them
         self.workbook.worksheet_mut(sheet)?.merged_cells = merged_cells;
         displace_merged_cells(
@@ -785,6 +786,7 @@ impl<'a> Model<'a> {
             }
         });
 
+        crate::charts::displace_charts(self, sheet, false, column, -column_count); // Foglio fork: charts
         // Merged ranges shrink or shift left; fully deleted ones are removed
         self.workbook.worksheet_mut(sheet)?.merged_cells = merged_cells;
         displace_merged_cells(
@@ -1065,6 +1067,7 @@ impl<'a> Model<'a> {
             }
         });
 
+        crate::charts::displace_charts(self, sheet, true, row, row_count); // Foglio fork: charts
         // Merged ranges shift down or grow when rows are inserted inside them
         self.workbook.worksheet_mut(sheet)?.merged_cells = merged_cells;
         displace_merged_cells(
@@ -1171,6 +1174,7 @@ impl<'a> Model<'a> {
             }
         });
 
+        crate::charts::displace_charts(self, sheet, true, row, -row_count); // Foglio fork: charts
         // Merged ranges shrink or shift up; fully deleted ones are removed
         self.workbook.worksheet_mut(sheet)?.merged_cells = merged_cells;
         displace_merged_cells(

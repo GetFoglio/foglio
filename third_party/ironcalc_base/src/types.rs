@@ -237,6 +237,8 @@ pub struct Worksheet {
     pub conditional_formatting: Vec<ConditionalFormatting>,
     /// Hyperlinks in the worksheet, keyed by (row, column) of the cell they are attached to
     pub links: HashMap<(i32, i32), Link>,
+    /// Foglio fork: charts placed on the sheet (see charts.rs)
+    pub charts: Vec<crate::charts::Chart>,
     /// Foglio fork: data validation rules (see data_validation.rs)
     pub data_validations: Vec<crate::data_validation::DataValidation>,
 }

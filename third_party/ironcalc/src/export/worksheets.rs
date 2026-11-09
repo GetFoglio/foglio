@@ -670,6 +670,8 @@ pub(crate) fn get_worksheet_xml(
         get_conditional_formatting_xml(&worksheet.conditional_formatting);
 
     let hyperlinks_section = get_hyperlinks_section(worksheet);
+    // Foglio fork: charts (<drawing> goes after <hyperlinks>, before <legacyDrawing> and <extLst>)
+    let drawing_section = crate::export::charts::drawing_element(worksheet);
     // Foglio fork: tab colour, data validation, comments (see annotations.rs)
     let sheet_pr = crate::export::annotations::sheet_pr_element(worksheet);
     let data_validations_section = crate::export::annotations::data_validations_element(worksheet);
@@ -693,6 +695,7 @@ pub(crate) fn get_worksheet_xml(
   {cf_sections}\
   {data_validations_section}\
   {hyperlinks_section}\
+  {drawing_section}\
   {legacy_drawing_section}\
   {cf_ext_lst}\
 </worksheet>"

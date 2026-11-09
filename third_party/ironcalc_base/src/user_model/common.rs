@@ -2446,6 +2446,7 @@ impl<'a> UserModel<'a> {
                 | Diff::DeleteNamedStyle { .. }
                 | Diff::UpdateNamedStyle { .. }
                 | Diff::SetCellLink { .. }
+                | Diff::SetCharts { .. } // Foglio fork: charts
                 | Diff::SetSheetAnnotations { .. } // Foglio fork: comments, data validation
                 | Diff::SetWorkbookName { .. } => {}
                 _ => {

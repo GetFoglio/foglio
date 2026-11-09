@@ -955,6 +955,7 @@ pub(super) fn load_sheet<R: Read + std::io::Seek>(
         show_grid_lines: sheet_view.show_grid_lines,
         conditional_formatting,
         links,
+        charts: vec![], // Foglio fork: charts, filled in by load_sheets
         data_validations: super::annotations::load_data_validations(ws), // Foglio fork
     })
 }
@@ -1014,7 +1015,7 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
                 comments: comments.to_vec(),
                 hyperlink_rels: hyperlink_rels.clone(),
             };
-            let s = load_sheet(
+            let mut s = load_sheet(
                 archive,
                 &path,
                 settings,
@@ -1025,6 +1026,7 @@ pub(super) fn load_sheets<R: Read + std::io::Seek>(
                 theme,
                 dxfs,
             )?;
+            s.charts = super::charts::load_sheet_charts(archive, &path, &s); // Foglio fork: charts
             sheets.push(s);
         }
     }

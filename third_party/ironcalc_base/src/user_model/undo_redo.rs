@@ -641,6 +641,10 @@ impl<'a> UserModel<'a> {
                     needs_evaluation = true;
                     self.model.workbook.worksheet_mut(*sheet)?.merged_cells = old_value.clone();
                 }
+                // Foglio fork: charts
+                Diff::SetCharts {
+                    sheet, old_value, ..
+                } => self.apply_charts_diff(*sheet, old_value)?,
                 // Foglio fork: comments, data validation
                 Diff::SetSheetAnnotations {
                     sheet, old_value, ..
@@ -1096,6 +1100,10 @@ impl<'a> UserModel<'a> {
                     needs_evaluation = true;
                     self.model.workbook.worksheet_mut(*sheet)?.merged_cells = new_value.clone();
                 }
+                // Foglio fork: charts
+                Diff::SetCharts {
+                    sheet, new_value, ..
+                } => self.apply_charts_diff(*sheet, new_value)?,
                 // Foglio fork: comments, data validation
                 Diff::SetSheetAnnotations {
                     sheet, new_value, ..

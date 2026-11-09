@@ -31,6 +31,8 @@ pub mod builtin_styles;
 pub mod calc_result;
 pub mod cell;
 pub mod cf_types;
+/// Foglio fork: charts (see charts.rs)
+pub mod charts;
 pub mod colors;
 /// Foglio fork: data validation and comments (see data_validation.rs)
 pub mod data_validation;
