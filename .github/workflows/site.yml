@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: pages
+  group: site
   cancel-in-progress: false
 
 jobs:
@@ -40,21 +40,17 @@ jobs:
           if [ -n "$CUSTOM_DOMAIN" ]; then export NEXT_PUBLIC_BASE_PATH=""; else export NEXT_PUBLIC_BASE_PATH="/${GITHUB_REPOSITORY#*/}"; fi
           npm run build
           touch out/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
+      # GitHub Pages serves the gh-pages branch (same result as scripts/deploy_site.sh).
+      - name: Publish to gh-pages
         if: github.event_name != 'pull_request'
-        with:
-          path: site/out
-
-  deploy:
-    if: github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+        env:
+          CUSTOM_DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
+        run: |
+          if [ -n "$CUSTOM_DOMAIN" ]; then echo "$CUSTOM_DOMAIN" > out/CNAME; fi
+          cd out
+          git init -q -b gh-pages
+          git config user.name "Acid236"
+          git config user.email "nicolodibenedetto236@gmail.com"
+          git add -A
+          git commit -qm "Website build from ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

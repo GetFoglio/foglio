@@ -15,5 +15,8 @@ npm run build        # → out/
   `guides.ts`); measured numbers come only from `src/content/facts.ts`. `SEO.md` has the keyword notes.
 - No client-side JavaScript of our own, no web fonts, no trackers. Screenshots are real renders of the
   app (`public/screenshots/`).
-- Hosting on the custom domain: set the repository variable `CUSTOM_DOMAIN` (e.g. `getfoglio.app`) and
-  the custom domain in *Settings ▸ Pages*; without it the site is built for `https://<owner>.github.io/foglio/`.
+- Deploy: GitHub Pages serves the `gh-pages` branch. `scripts/deploy_site.sh` builds and publishes it
+  from your Mac; the workflow does the same on every push to `main` that touches `site/`.
+- Custom domain: `CUSTOM_DOMAIN=getfoglio.app scripts/deploy_site.sh` (and the repository variable
+  `CUSTOM_DOMAIN` for the workflow), then set the domain in *Settings ▸ Pages*. Without it the site is
+  built for `https://<owner>.github.io/foglio/`.
