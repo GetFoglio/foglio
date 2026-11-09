@@ -158,6 +158,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     static let pasteboardType = NSPasteboard.PasteboardType("org.foglio.cells")
 
+    // AutoFilter (one table per sheet)
+    private(set) var filters: [Int: FilterState] = [:]
+    private var filterPopover: NSPopover?
+
     init(book: Workbook) {
         self.book = book
         super.init(frame: .zero)
@@ -411,6 +415,31 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             accent.setStroke()
             p.stroke()
         }
+        if let f = filters[sheet] {
+            for c in f.range.c0...f.range.c1 {
+                let r = filterButtonRect(c, f, g)
+                guard r.intersects(gridArea) else { continue }
+                let active = !(f.excluded[c]?.isEmpty ?? true)
+                let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
+                (active ? NSColor.controlAccentColor : NSColor.controlBackgroundColor).setFill()
+                path.fill()
+                NSColor.separatorColor.setStroke()
+                path.lineWidth = 0.5
+                path.stroke()
+                let name = active ? "line.3.horizontal.decrease" : "chevron.down"
+                if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(pointSize: 8, weight: .bold)) {
+                    let tinted = img.copy() as! NSImage
+                    tinted.lockFocus()
+                    (active ? NSColor.white : NSColor.secondaryLabelColor).set()
+                    NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
+                    tinted.unlockFocus()
+                    tinted.draw(in: CGRect(x: r.midX - tinted.size.width / 2, y: r.midY - tinted.size.height / 2,
+                                           width: tinted.size.width, height: tinted.size.height),
+                                from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                }
+            }
+        }
         if let p = resizePreview {
             NSColor.controlAccentColor.setFill()
             if p.isCol { CGRect(x: x(p.index, g) + p.size - 1, y: headerH, width: 1, height: viewSize.height).fill() }
@@ -596,6 +625,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         case 51, 117:
             clearSelection()
         case 120: beginEditing(.edit, initial: nil) // F2
+        case 49 where shift && !cmd: // ⇧Space: whole rows
+            select(range: GridRange(r0: selection.r0, c0: 0, r1: selection.r1, c1: Sheet.maxCols - 1), active: active)
+        case 49 where flags.contains(.control): // ⌃Space: whole columns
+            select(range: GridRange(r0: 0, c0: selection.c0, r1: Sheet.maxRows - 1, c1: selection.c1), active: active)
         case 53: // esc
             if cutRange != nil { cutRange = nil; needsDisplay = true }
         default:
@@ -678,6 +711,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         if isEditing { commitEditing(move: nil) }
         window?.makeFirstResponder(self)
 
+        if let f = filters[sheet], let col = (f.range.c0...f.range.c1).first(where: { filterButtonRect($0, f, g).insetBy(dx: -2, dy: -2).contains(p) }) {
+            showFilterPopover(col)
+            return
+        }
         if inColHeader, let c = colBoundary(at: p, g) {
             if e.clickCount == 2 { autofitColumns(c...c); return }
             drag = .resizeCol(c, p.x, g.cols.size(c))
@@ -689,6 +726,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             return
         }
         if !inColHeader && !inRowHeader && fillHandleRect(g).insetBy(dx: -3, dy: -3).contains(p) && p.x > headerW && p.y > headerH {
+            if e.clickCount == 2 { fillDownToNeighbour(); return }
             drag = .fill(selection)
             return
         }
@@ -1373,6 +1411,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             let g = geo
             item.title = g.fr > 0 || g.fc > 0 ? L("Unfreeze Panes") : L("Freeze Panes")
             return true
+        case #selector(toggleFilter(_:)):
+            item.state = filters[sheet] != nil ? .on : .off
+            return true
         case #selector(toggleGridlines(_:)):
             item.state = geo.showGrid ? .on : .off
             return true
@@ -1381,6 +1422,104 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             return true
         default: return true
         }
+    }
+
+    // MARK: AutoFilter
+
+    private func filterButtonRect(_ c: Int, _ f: FilterState, _ g: Geo) -> CGRect {
+        let r = cellRect(f.range.r0, c, g)
+        let s: CGFloat = min(15, r.height - 4)
+        return CGRect(x: r.maxX - s - 3, y: r.midY - s / 2, width: s, height: s)
+    }
+
+    @objc func toggleFilter(_ sender: Any?) {
+        commitIfEditing()
+        if let f = filters[sheet] {
+            if let rows = f.dataRows { book.setHidden(sheet: sheet, rows: true, rows.lowerBound, rows.upperBound, hidden: false) }
+            filters[sheet] = nil
+            contentChanged()
+            return
+        }
+        var r = selection.isSingle ? book.currentRegion(sheet: sheet, row: active.row, col: active.col) : selection
+        r.r1 = min(r.r1, geo.maxRow)
+        r.c1 = min(r.c1, geo.maxCol)
+        guard r.rows >= 2 else { NSSound.beep(); return }
+        filters[sheet] = FilterState(range: r)
+        needsDisplay = true
+        delegate?.gridSelectionChanged(self)
+    }
+
+    private func columnValues(_ f: FilterState, cols: ClosedRange<Int>) -> [Int: [Int: String]] {
+        guard let rows = f.dataRows else { return [:] }
+        var out: [Int: [Int: String]] = [:]
+        for c in book.viewport(sheet: sheet, rows: rows, cols: cols) { out[c.col, default: [:]][c.row] = c.text }
+        return out
+    }
+
+    private func showFilterPopover(_ col: Int) {
+        guard let f = filters[sheet], let rows = f.dataRows else { return }
+        let vals = columnValues(f, cols: col...col)[col] ?? [:]
+        var distinct = Set(vals.values)
+        if vals.count < rows.count { distinct.insert("") }
+        let sorted = distinct.sorted { a, b in
+            if a.isEmpty != b.isEmpty { return !a.isEmpty }
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }
+        let vc = FilterPopoverController(values: sorted, excluded: f.excluded[col] ?? [], onApply: { [weak self] excluded in
+            self?.applyFilter(col: col, excluded: excluded)
+        }, onSort: { [weak self] asc in
+            guard let self, let rows = self.filters[self.sheet]?.dataRows, let fr = self.filters[self.sheet]?.range else { return }
+            self.book.sort(sheet: self.sheet, GridRange(r0: rows.lowerBound, c0: fr.c0, r1: rows.upperBound, c1: fr.c1), keyCol: col, ascending: asc)
+            self.reapplyFilter()
+        })
+        let pop = NSPopover()
+        pop.contentViewController = vc
+        pop.behavior = .transient
+        vc.closeAction = { [weak pop] in pop?.performClose(nil) }
+        let r = filterButtonRect(col, f, geo)
+        pop.show(relativeTo: CGRect(x: r.minX * zoom, y: r.minY * zoom, width: r.width * zoom, height: r.height * zoom), of: self, preferredEdge: .maxY)
+        filterPopover = pop
+    }
+
+    func applyFilter(col: Int, excluded: Set<String>) {
+        guard var f = filters[sheet] else { return }
+        f.excluded[col] = excluded.isEmpty ? nil : excluded
+        filters[sheet] = f
+        reapplyFilter()
+    }
+
+    private func reapplyFilter() {
+        guard let f = filters[sheet], let rows = f.dataRows else { return }
+        let active = f.excluded.filter { !$0.value.isEmpty }
+        book.setHidden(sheet: sheet, rows: true, rows.lowerBound, rows.upperBound, hidden: false)
+        if !active.isEmpty {
+            let cols = active.keys.min()!...active.keys.max()!
+            let values = columnValues(f, cols: cols)
+            var runStart: Int?
+            func flush(_ end: Int) {
+                if let s = runStart { book.setHidden(sheet: sheet, rows: true, s, end, hidden: true); runStart = nil }
+            }
+            for r in rows {
+                let hide = active.contains { col, ex in ex.contains(values[col]?[r] ?? "") }
+                if hide { if runStart == nil { runStart = r } } else { flush(r - 1) }
+            }
+            flush(rows.upperBound)
+        }
+        contentChanged()
+    }
+
+    /// Double-click on the fill handle: fill down as far as the neighbouring column has data (Excel).
+    private func fillDownToNeighbour() {
+        let s = selection
+        var last = -1
+        for nc in [s.c0 - 1, s.c1 + 1] where nc >= 0 {
+            let region = book.currentRegion(sheet: sheet, row: s.r1, col: nc)
+            if !book.formatted(sheet: sheet, row: s.r1, col: nc).isEmpty || region.rows > 1 { last = max(last, region.r1) }
+        }
+        guard last > s.r1 else { NSSound.beep(); return }
+        book.autofill(sheet: sheet, s, toRow: last, toCol: nil)
+        select(range: GridRange(r0: s.r0, c0: s.c0, r1: last, c1: s.c1), active: active)
+        contentChanged()
     }
 
     // Find support

@@ -228,6 +228,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         sortDown.target = nil
         let freeze = button("snowflake", "Freeze Panes", #selector(GridView.freezePanes(_:)))
         freeze.target = nil
+        let filter = button("line.3.horizontal.decrease.circle", "Filter", #selector(GridView.toggleFilter(_:)))
+        filter.target = nil
 
         let undo = button("arrow.uturn.backward", "Undo (⌘Z)", #selector(GridView.undo(_:)))
         undo.target = nil
@@ -245,7 +247,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             (divider(), NSStackView.VisibilityPriority(900)),
             (group([numberFormatPopup, percent, thousands, incDec, decDec]), NSStackView.VisibilityPriority(700)),
             (divider(), NSStackView.VisibilityPriority(700)),
-            (group([sum, sortUp, sortDown, freeze]), NSStackView.VisibilityPriority(600)),
+            (group([sum, sortUp, sortDown, filter, freeze]), NSStackView.VisibilityPriority(600)),
         ]
         for (v, p) in groups {
             bar.addView(v, in: .leading)

@@ -29,6 +29,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
+    private var settingsWindow: NSWindow?
+
+    @objc func showSettings(_ sender: Any?) {
+        if settingsWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 170), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+            w.title = L("Settings")
+            w.isReleasedWhenClosed = false
+            let grid = NSGridView(numberOfColumns: 2, rows: 0)
+            grid.rowSpacing = 10
+            grid.columnSpacing = 10
+            let langs: [(String, String?)] = [(L("Automatic"), nil), ("English", "en"), ("Italiano", "it"), ("Deutsch", "de"), ("Español", "es"), ("Français", "fr")]
+            let locales: [(String, String?)] = [(L("Automatic"), nil), ("English (US)", "en"), ("English (UK)", "en-GB"), ("Italiano", "it"),
+                                                ("Deutsch", "de"), ("Español", "es"), ("Français", "fr")]
+            func popup(_ items: [(String, String?)], key: String) -> NSPopUpButton {
+                let p = NSPopUpButton(frame: .zero, pullsDown: false)
+                for (t, v) in items { p.addItem(withTitle: t); p.lastItem?.representedObject = v }
+                let current = UserDefaults.standard.string(forKey: key)
+                p.selectItem(at: items.firstIndex { $0.1 == current } ?? 0)
+                p.target = self
+                p.action = #selector(settingChanged(_:))
+                p.identifier = NSUserInterfaceItemIdentifier(key)
+                return p
+            }
+            grid.addRow(with: [NSTextField(labelWithString: L("Function names:")), popup(langs, key: "FormulaLanguage")])
+            grid.addRow(with: [NSTextField(labelWithString: L("Numbers and dates:")), popup(locales, key: "FormulaLocale")])
+            let note = NSTextField(wrappingLabelWithString: L("Changes apply after restarting Foglio. Files always store formulas in Excel's standard format, so they open correctly in any language."))
+            note.font = .systemFont(ofSize: 11)
+            note.textColor = .secondaryLabelColor
+            note.preferredMaxLayoutWidth = 380
+            grid.addRow(with: [NSGridCell.emptyContentView, note])
+            grid.column(at: 0).xPlacement = .trailing
+            let container = NSView()
+            container.addSubview(grid)
+            grid.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([grid.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                                         grid.topAnchor.constraint(equalTo: container.topAnchor, constant: 20)])
+            w.contentView = container
+            w.center()
+            settingsWindow = w
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func settingChanged(_ p: NSPopUpButton) {
+        guard let key = p.identifier?.rawValue else { return }
+        if let v = p.selectedItem?.representedObject as? String { UserDefaults.standard.set(v, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
     // MARK: - Benchmarks / demo (only with FOGLIO_* environment variables)
 
     private var firstController: SheetWindowController? {
@@ -131,6 +180,10 @@ enum UIScript {
             case "format": c.grid.setStyle("num_fmt", arg)
             case "wrap": c.wrapAction(nil)
             case "width": if let ref = parseA1(arg + "1") { c.grid.book.setColumnWidth(sheet: c.grid.sheet, ref.col, ref.col, px: 200); c.grid.contentChanged() }
+            case "autofilter": c.grid.toggleFilter(nil)
+            case "exclude": // exclude G alto
+                let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if p.count == 2, let ref = parseA1(p[0] + "1") { c.grid.applyFilter(col: ref.col, excluded: [p[1]]) }
             case "savexlsx":
                 do { try c.grid.book.saveXLSX(to: URL(fileURLWithPath: arg)); print("SAVED", arg) } catch { print("SAVE_ERROR", error) }
             case "print":

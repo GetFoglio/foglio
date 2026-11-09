@@ -41,6 +41,8 @@ enum Menus {
         main.addItem(submenu(appName, [
             NSMenuItem(title: String(format: L("About %@"), appName), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""),
             .separator(),
+            item("Settings…", #selector(AppDelegate.showSettings(_:)), ","),
+            .separator(),
             servicesItem,
             .separator(),
             NSMenuItem(title: String(format: L("Hide %@"), appName), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"),
@@ -169,6 +171,8 @@ enum Menus {
         main.addItem(submenu("Data", [
             item("Sort A to Z", #selector(GridView.sortAscending(_:)), symbol: "arrow.up"),
             item("Sort Z to A", #selector(GridView.sortDescending(_:)), symbol: "arrow.down"),
+            .separator(),
+            item("Filter", #selector(GridView.toggleFilter(_:)), "f", [.command, .shift], symbol: "line.3.horizontal.decrease.circle"),
         ]))
 
         let windowMenu = NSMenu(title: L("Window"))
