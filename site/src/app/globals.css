@@ -481,7 +481,8 @@ code {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(4, 1fr);
+  max-width: 900px;
   gap: 12px;
 }
 
@@ -1168,9 +1169,6 @@ pre.code code {
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1080px) {
-  .stats-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
   .cards-4 {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1240,5 +1238,76 @@ pre.code code {
   .btn,
   .card-link {
     transition: none;
+  }
+}
+
+/* ---------- Speed metrics / formats row ---------- */
+
+.metrics {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.metrics li {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.metric-value {
+  font-size: 1.9rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metric-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text);
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.metric-sub {
+  font-weight: 400;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.formats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.formats .chips {
+  margin: 0;
+  gap: 8px;
+}
+
+.formats .chips li {
+  padding: 4px 12px;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 620px) {
+  .metrics li {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

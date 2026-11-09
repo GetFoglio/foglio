@@ -21,8 +21,6 @@ export function HomePage({ locale }: { locale: Locale }) {
     { value: `${n(facts.dmgMB)} MB`, label: h.statLabels.download },
     { value: `${n(facts.launchSeconds)} s`, label: h.statLabels.launch },
     { value: `${n(facts.idleMemoryMB)} MB`, label: h.statLabels.memory },
-    { value: `${n(facts.open100kSeconds)} s`, label: h.statLabels.open100k },
-    { value: `${n(facts.editMs)} ms`, label: h.statLabels.recalc },
     { value: locale === "en" ? "$0" : "0 €", label: h.statLabels.price },
   ];
   const sizes = [
@@ -31,12 +29,21 @@ export function HomePage({ locale }: { locale: Locale }) {
     { label: comparisonApps.numbers.name, value: sizeComparisonMB.numbers },
     { label: comparisonApps.excel.name, value: sizeComparisonMB.excel },
   ].map((s) => ({ ...s, display: s.value >= 1000 ? `${n(s.value / 1000)} GB` : `${n(s.value)} MB` }));
-  const lookups = [
-    { label: "IronCalc 0.9.1", value: facts.vlookupBeforeMs, display: `${n(facts.vlookupBeforeMs)} ms` },
-    { label: `${site.name}`, value: facts.vlookupAfterMs, display: `${n(facts.vlookupAfterMs)} ms`, highlight: true },
-  ];
-  const teaserRows = comparisonRows.slice(0, 8);
   const ui = homeUi[locale];
+  const speedup = Math.round(facts.vlookupBeforeMs / facts.vlookupAfterMs / 100) * 100;
+  const metrics = [
+    { value: `${n(facts.open100kSeconds)} s`, label: h.statLabels.open100k },
+    { value: `${n(facts.editMs)} ms`, label: h.statLabels.recalc },
+    {
+      value: `${n(facts.vlookupAfterMs)} ms`,
+      label: ui.lookupTitle,
+      sub: ui.lookupSub(n(Math.round(facts.vlookupBeforeMs / 100) / 10), new Intl.NumberFormat(locale === "en" ? "en-US" : "it-IT", { useGrouping: "always" }).format(speedup)),
+    },
+  ];
+  // Fewer, distinct features: speed, size and privacy have their own sections.
+  const shown = new Set(["file", "function", "globe", "apple", "chart", "filter"]);
+  const features = h.features.filter((f) => shown.has(f.icon)).slice(0, 6);
+  const teaserRows = comparisonRows.slice(0, 6);
 
   return (
     <Shell locale={locale} path="/">
@@ -50,7 +57,7 @@ export function HomePage({ locale }: { locale: Locale }) {
             </p>
             <DownloadButtons locale={locale} />
             <ul className="badges">
-              {h.badges.map((b) => (
+              {h.badges.slice(0, 3).map((b) => (
                 <li key={b}>
                   <Icon name="check" size={16} />
                   {b}
@@ -64,7 +71,7 @@ export function HomePage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <section className="stats" aria-label={h.speedTitle}>
+      <section className="stats">
         <div className="wrap stats-grid">
           {stats.map((s) => (
             <div key={s.label} className="stat">
@@ -84,7 +91,7 @@ export function HomePage({ locale }: { locale: Locale }) {
             </p>
           </div>
           <div className="cards">
-            {h.features.map((f) => (
+            {features.map((f) => (
               <article key={f.title} className="card">
                 <span className="card-icon">
                   <Icon name={f.icon} size={22} />
@@ -95,6 +102,14 @@ export function HomePage({ locale }: { locale: Locale }) {
                 </p>
               </article>
             ))}
+          </div>
+          <div className="formats">
+            <span className="muted small">{ui.opens}</span>
+            <ul className="chips">
+              {formats.map((f) => (
+                <li key={f}>.{f}</li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>
@@ -109,11 +124,19 @@ export function HomePage({ locale }: { locale: Locale }) {
           </div>
           <div className="two-col">
             <Bars title={h.statLabels.download} unit={ui.lower} items={sizes} />
-            <Bars title={ui.lookupTitle} unit={ui.lower} items={lookups} note={ui.lookupNote} />
+            <ul className="metrics">
+              {metrics.map((m) => (
+                <li key={m.label}>
+                  <span className="metric-value">{m.value}</span>
+                  <span className="metric-label">
+                    {m.label}
+                    {m.sub && <span className="metric-sub">{m.sub}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <p className="muted small center">
-            <Inline text={h.speedNote} locale={locale} />
-          </p>
+          <p className="muted small center">{ui.tested}</p>
         </div>
       </section>
 
@@ -132,21 +155,7 @@ export function HomePage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <section className="section alt" aria-labelledby="formats">
-        <div className="wrap narrow center">
-          <h2 id="formats">{h.formatsTitle}</h2>
-          <p className="lead">
-            <Inline text={h.formatsText} locale={locale} />
-          </p>
-          <ul className="chips">
-            {formats.map((f) => (
-              <li key={f}>.{f}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section className="section" aria-labelledby="compare">
+      <section className="section alt" aria-labelledby="compare">
         <div className="wrap">
           <div className="section-head">
             <h2 id="compare">{h.compareTitle}</h2>
@@ -164,7 +173,7 @@ export function HomePage({ locale }: { locale: Locale }) {
         </div>
       </section>
 
-      <section className="section alt" aria-labelledby="tech">
+      <section className="section" aria-labelledby="tech">
         <div className="wrap two-col align-center">
           <div>
             <h2 id="tech">{h.techTitle}</h2>
@@ -255,11 +264,23 @@ export function HomePage({ locale }: { locale: Locale }) {
   );
 }
 
-const homeUi: Record<Locale, { lower: string; lookupTitle: string; lookupNote: string; arch: [string, string, string, string] }> = {
+const homeUi: Record<
+  Locale,
+  {
+    lower: string;
+    lookupTitle: string;
+    lookupSub: (before: string, times: string) => string;
+    tested: string;
+    opens: string;
+    arch: [string, string, string, string];
+  }
+> = {
   en: {
-    lower: "lower is better",
+    lower: "smaller is better",
     lookupTitle: "1,000 VLOOKUPs over 10,000 rows",
-    lookupNote: "Upstream engine vs Foglio's fork with indexed lookups.",
+    lookupSub: (before, times) => `${before} seconds in the original engine: about ${times}× faster`,
+    tested: "Tested on a Mac with an M4 processor, macOS 27.",
+    opens: "Opens",
     arch: [
       "Windows, menus, documents and a custom grid view drawn with AppKit",
       "Rust core",
@@ -268,9 +289,11 @@ const homeUi: Record<Locale, { lower: string; lookupTitle: string; lookupNote: s
     ],
   },
   it: {
-    lower: "più basso è meglio",
+    lower: "più piccolo è meglio",
     lookupTitle: "1.000 CERCA.VERT su 10.000 righe",
-    lookupNote: "Motore originale contro il fork di Foglio con ricerche indicizzate.",
+    lookupSub: (before, times) => `${before} secondi nel motore originale: circa ${times} volte più veloce`,
+    tested: "Testato su un Mac con processore M4, macOS 27.",
+    opens: "Apre",
     arch: [
       "Finestre, menu, documenti e una griglia su misura disegnata con AppKit",
       "Nucleo in Rust",
