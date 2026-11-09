@@ -217,6 +217,25 @@ final class Workbook {
         return max(0, n)
     }
 
+    // MARK: defined names
+    struct DefinedName { let name: String; let scope: Int?; let formula: String }
+    var definedNames: [DefinedName] {
+        (Workbook.take(foglio_defined_names(ptr)) ?? "").split(separator: "\n").compactMap { line in
+            let p = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard p.count == 3 else { return nil }
+            let sc = Int(p[1]) ?? -1
+            return DefinedName(name: p[0], scope: sc < 0 ? nil : sc, formula: p[2])
+        }
+    }
+    func defineName(_ name: String, scope: Int?, formula: String) throws {
+        var err: UnsafeMutablePointer<CChar>?
+        if foglio_define_name(ptr, name, Int32(scope ?? -1), formula, &err) != 0 {
+            throw EngineError(message: Workbook.take(err) ?? L("Invalid name."))
+        }
+        changed()
+    }
+    func deleteName(_ name: String, scope: Int?) { _ = foglio_delete_name(ptr, name, Int32(scope ?? -1)); changed() }
+
     // MARK: format painter
     func copyStyles(sheet: Int, _ r: GridRange) { _ = foglio_copy_styles(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c) }
     func pasteStyles(sheet: Int, _ r: GridRange) { _ = foglio_paste_styles(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c); changed() }
@@ -303,10 +322,11 @@ final class Workbook {
     /// "SOMMA(num1; [num2]; ...)" plus the range of each argument (UTF-16).
     static func localizedSignature(_ local: String) -> String { signatureParts(local).0 }
     static func signatureParts(_ local: String) -> (String, [NSRange]) {
-        guard let doc = FunctionDocs.doc(englishName(local)) else { return ("\(local)()", []) }
+        guard FunctionDocs.doc(englishName(local)) != nil else { return ("\(local)()", []) }
+        let args = FunctionDocs.localizedArgs(englishName(local), italian: FormulaLocale.current.language == "it")
         var s = local + "("
         var ranges: [NSRange] = []
-        for (i, a) in doc.args.enumerated() {
+        for (i, a) in args.enumerated() {
             if i > 0 { s += argSeparator + " " }
             ranges.append(NSRange(location: (s as NSString).length, length: (a as NSString).length))
             s += a

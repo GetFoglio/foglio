@@ -156,7 +156,7 @@ final class CompletionPopup: NSPanel, NSTableViewDataSource, NSTableViewDelegate
         let col = NSTableColumn(identifier: .init("f"))
         table.addTableColumn(col)
         table.headerView = nil
-        table.rowHeight = 30
+        table.rowHeight = 22
         table.dataSource = self
         table.delegate = self
         table.backgroundColor = .clear
@@ -179,8 +179,8 @@ final class CompletionPopup: NSPanel, NSTableViewDataSource, NSTableViewDelegate
         table.reloadData()
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         table.scrollRowToVisible(0)
-        let h = CGFloat(min(items.count, 7)) * table.rowHeight + 8
-        setFrame(NSRect(x: rect.minX, y: rect.minY - h - 2, width: 420, height: h), display: true)
+        let h = CGFloat(min(items.count, 8)) * table.rowHeight + 8
+        setFrame(NSRect(x: rect.minX, y: rect.minY - h - 2, width: 460, height: h), display: true)
         if parent != self.parent { parent.addChildWindow(self, ordered: .above) }
         orderFront(nil)
     }
@@ -211,6 +211,9 @@ final class CompletionPopup: NSPanel, NSTableViewDataSource, NSTableViewDelegate
             c.identifier = id
             let t = NSTextField(labelWithString: "")
             t.lineBreakMode = .byTruncatingTail
+            t.maximumNumberOfLines = 1
+            t.cell?.wraps = false
+            t.cell?.truncatesLastVisibleLine = true
             t.translatesAutoresizingMaskIntoConstraints = false
             c.addSubview(t)
             c.textField = t

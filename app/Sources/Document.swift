@@ -104,6 +104,10 @@ final class SpreadsheetDocument: NSDocument {
         let view = PrintView(book: book, sheet: wc.grid.sheet, selection: wc.grid.selection, printInfo: info)
         let op = NSPrintOperation(view: view, printInfo: info)
         op.jobTitle = displayName
+        let options = PrintOptionsController()
+        options.printView = view
+        op.printPanel.options.insert([.showsOrientation, .showsScaling, .showsPaperSize, .showsPreview])
+        op.printPanel.addAccessoryController(options)
         return op
     }
 }
@@ -119,6 +123,12 @@ final class PrintView: NSView {
     private var pages: [CGRect] = []
     private let unit: CGFloat = 0.75
     private var merges: [GridRange] = []
+    private let layout: SheetLayout
+    private var printInfoRef: NSPrintInfo
+    /// Scale the sheet so every column fits the page width (never enlarges).
+    var fitToWidth = true { didSet { relayout() } }
+    var printGridlines = false { didSet { needsDisplay = true } }
+    private var scale: CGFloat = 1
 
     init(book: Workbook, sheet: Int, selection: GridRange, printInfo: NSPrintInfo) {
         self.book = book
@@ -131,14 +141,31 @@ final class PrintView: NSView {
         }
         painter.printing = true
         painter.fontScale = 1
+        layout = l
+        printInfoRef = printInfo
         super.init(frame: .zero)
-        let colAxis = Axis(defaultSize: l.defaultCol * unit, count: Sheet.maxCols, overrides: l.cols.map { ($0.0, $0.2 ? 0 : $0.1 * unit) })
-        let rowAxis = Axis(defaultSize: l.defaultRow * unit, count: Sheet.maxRows, overrides: l.rows.map { ($0.0, $0.2 ? 0 : $0.1 * unit) })
+        merges = book.merges(sheet: sheet)
+        relayout()
+    }
+
+    private func relayout() {
+        let l = layout
+        func axes(_ k: CGFloat) -> (Axis, Axis) {
+            (Axis(defaultSize: l.defaultCol * unit * k, count: Sheet.maxCols, overrides: l.cols.map { ($0.0, $0.2 ? 0 : $0.1 * unit * k) }),
+             Axis(defaultSize: l.defaultRow * unit * k, count: Sheet.maxRows, overrides: l.rows.map { ($0.0, $0.2 ? 0 : $0.1 * unit * k) }))
+        }
+        var (colAxis, rowAxis) = axes(1)
+        let pageW = printInfoRef.paperSize.width - printInfoRef.leftMargin - printInfoRef.rightMargin
+        let contentW = colAxis.pos(range.c1 + 1) - colAxis.pos(range.c0)
+        scale = fitToWidth && contentW > pageW ? max(0.2, pageW / contentW) : 1
+        if scale != 1 { (colAxis, rowAxis) = axes(scale) }
+        painter.fontScale = scale
+        painter.resetColors()
         colX = (range.c0...(range.c1 + 1)).map { colAxis.pos($0) - colAxis.pos(range.c0) }
         rowY = (range.r0...(range.r1 + 1)).map { rowAxis.pos($0) - rowAxis.pos(range.r0) }
-        merges = book.merges(sheet: sheet)
         setFrameSize(NSSize(width: colX.last ?? 0, height: rowY.last ?? 0))
-        paginate(printInfo)
+        paginate(printInfoRef)
+        needsDisplay = true
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
@@ -191,7 +218,7 @@ final class PrintView: NSView {
         let c0 = range.c0 + first(colX, dirtyRect.minX), c1 = range.c0 + min(colX.count - 2, first(colX, dirtyRect.maxX - 0.5))
         guard r1 >= r0, c1 >= c0 else { return }
         let data = CellData(book.viewport(sheet: sheet, rows: r0...r1, cols: c0...c1))
-        painter.paint(rows: r0...r1, cols: c0...c1, data: data, merges: merges, showGrid: false, hair: 0.5, clip: dirtyRect,
+        painter.paint(rows: r0...r1, cols: c0...c1, data: data, merges: merges, showGrid: printGridlines, hair: 0.5, clip: dirtyRect,
                       gridColor: .lightGray, rect: rect, colWidth: { self.rect(r0, $0).width }, rowHeight: { self.rect($0, c0).height })
     }
 }

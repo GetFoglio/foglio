@@ -50,4 +50,5 @@ run "enter after tab returns" "click B2;; type 1;; key tab;; type 2;; key tab;; 
 run "paste tiles over selection" "input A1=5;; click A1;; key cmd+c;; select C1:C4;; key cmd+v;; print C4" "CELL C4 = 5 | 5"
 run "remove duplicates" "input A1=Nome;; input A2=x;; input A3=y;; input A4=x;; select A1;; bold;; select A2;; removedups;; print A3;; print A4" "CELL A3 = y | y" "CELL A4 =  |"
 run "show formulas" "input A1=2;; input A2==A1*3;; showformulas;; state" "editing=false"
+run "defined names" "input B2=1;; input B3=2;; input B4=3;; select B2:B4;; namebox Vendite;; input D1==SOMMA(Vendite);; print D1;; select F9;; namebox vendite;; state" "CELL D1 = 6 | =SOMMA(Vendite)" "sel=B2:B4"
 exit $fail

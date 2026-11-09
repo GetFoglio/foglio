@@ -1131,3 +1131,56 @@ pub extern "C" fn foglio_remove_duplicates(b: *mut FoglioBook, sheet: u32, r0: i
     b.style_cache.clear();
     r
 }
+
+// ---------- defined names ----------
+
+/// One defined name per line: "NAME\tSCOPE\tFORMULA" (SCOPE = sheet index or -1 for workbook scope).
+#[no_mangle]
+pub extern "C" fn foglio_defined_names(b: *const FoglioBook) -> *mut c_char {
+    let Some(b) = book_ref(b) else { return ptr::null_mut() };
+    guard(ptr::null_mut(), || {
+        let lines: Vec<String> = b
+            .model
+            .get_defined_name_list()
+            .into_iter()
+            .map(|(n, scope, f)| format!("{n}\t{}\t{f}", scope.map(|s| s as i64).unwrap_or(-1)))
+            .collect();
+        to_c(lines.join("\n"))
+    })
+}
+
+/// Creates (or replaces) a defined name. scope < 0 = workbook. formula like "Sheet1!$A$1:$B$5".
+#[no_mangle]
+pub unsafe extern "C" fn foglio_define_name(b: *mut FoglioBook, name: *const c_char, scope: i32, formula: *const c_char,
+                                            err_out: *mut *mut c_char) -> i32 {
+    let (Some(b), Some(name), Some(formula)) = (book(b), cstr(name), cstr(formula)) else { return -1 };
+    let scope = if scope < 0 { None } else { Some(scope as u32) };
+    let formula = formula.trim_start_matches('=');
+    let res = catch_unwind_silent(|| {
+        let exists = b.model.get_defined_name_list().iter().any(|(n, s, _)| n.eq_ignore_ascii_case(name) && *s == scope);
+        if exists {
+            b.model.update_defined_name(name, scope, name, scope, formula)
+        } else {
+            b.model.new_defined_name(name, scope, formula)
+        }
+    });
+    match res {
+        Some(Ok(())) => 0,
+        Some(Err(e)) => {
+            crate::write_err(err_out, e);
+            -1
+        }
+        None => -1,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn foglio_delete_name(b: *mut FoglioBook, name: *const c_char, scope: i32) -> i32 {
+    let (Some(b), Some(name)) = (book(b), cstr(name)) else { return -1 };
+    let scope = if scope < 0 { None } else { Some(scope as u32) };
+    guard(-1, || rc(b.model.delete_defined_name(name, scope)))
+}
+
+fn catch_unwind_silent<T>(f: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+}

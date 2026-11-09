@@ -333,6 +333,7 @@ enum UIScript {
             case "transpose": c.grid.pasteTransposed()
             case "removedups": c.grid.removeDuplicates(nil)
             case "insertrows": c.grid.insertRows(nil)
+            case "namebox": c.nameBoxForTesting(arg)
             case "showformulas": c.grid.toggleShowFormulas(nil)
             case "recalc": c.grid.recalculate(nil)
             case "painter": c.formatPainter(nil)

@@ -596,6 +596,11 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
             if let r = FormulaText.gridRange(refText.uppercased()) {
                 if sheetIndex != grid.sheet { switchTo(sheet: sheetIndex) }
                 grid.select(range: r)
+            } else if goToName(text) {
+                return true
+            } else if !text.isEmpty, text.range(of: "^[A-Za-z_\\p{L}][A-Za-z0-9_.\\p{L}]*$", options: .regularExpression) != nil {
+                // Excel: typing a new name in the Name Box names the selection.
+                do { try grid.book.defineName(text, scope: nil, formula: selectionReference()); gridSelectionChanged(grid) } catch { NSSound.beep() }
             } else {
                 NSSound.beep()
             }
@@ -803,5 +808,10 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
 
     // Test hooks (scripts/ui_tests.sh)
     func focusFormulaBarForTesting() { window?.makeFirstResponder(formulaField) }
+    func nameBoxForTesting(_ text: String) {
+        nameBox.stringValue = text
+        window?.makeFirstResponder(nameBox)
+        if let tv = nameBox.currentEditor() as? NSTextView { _ = control(nameBox, textView: tv, doCommandBy: #selector(NSResponder.insertNewline(_:))) }
+    }
     func selectSheetForTesting(_ i: Int) { switchTo(sheet: i) }
 }

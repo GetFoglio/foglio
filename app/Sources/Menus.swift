@@ -132,6 +132,10 @@ enum Menus {
             .separator(),
             item("AutoSum", #selector(W.autoSumMenu(_:)), "t", [.command, .shift], tag: 0),
             item("Function…", #selector(W.insertFunction(_:))),
+            submenu("Name", [
+                item("Define Name…", #selector(W.defineName(_:))),
+                item("Name Manager…", #selector(W.nameManager(_:)), "l", [.command, .control]),
+            ]),
             .separator(),
             item("Current Date", #selector(W.insertDate(_:)), ";", [.control]),
             item("Current Time", #selector(W.insertTime(_:)), ";", [.command]),

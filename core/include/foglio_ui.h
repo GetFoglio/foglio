@@ -80,3 +80,8 @@ int32_t foglio_paste_styles(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c
 
 // Data ▸ Remove Duplicates (all columns compared, first occurrence kept). Returns rows removed.
 int32_t foglio_remove_duplicates(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
+
+// Defined names. List: "NAME\tSCOPE\tFORMULA" per line (SCOPE -1 = workbook).
+char *foglio_defined_names(const FoglioBook *b);
+int32_t foglio_define_name(FoglioBook *b, const char *name, int32_t scope, const char *formula, char **err_out);
+int32_t foglio_delete_name(FoglioBook *b, const char *name, int32_t scope);
