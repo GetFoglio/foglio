@@ -181,8 +181,10 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private var dataCache: [RegionKey: CellData] = [:]
     private var dataKey = (-1, -1)
 
-    private let vScroller = NSScroller()
-    private let hScroller = NSScroller()
+    // NSScroller takes its orientation from the frame it is created with: a zero frame makes both
+    // vertical, so the horizontal one would draw as a tiny vertical bar in the bottom-right corner.
+    private let vScroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 200))
+    private let hScroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 200, height: 15))
 
     // Benchmark
     private var autoScrollFrames = 0
@@ -472,7 +474,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     private(set) var lastDrawnHeaders: (rows: ClosedRange<Int>?, cols: ClosedRange<Int>?)
     /// True when the scroll bars sit on the view's right and bottom edges (laid out for the current size).
     var scrollersFitForTesting: Bool {
-        abs(vScroller.frame.maxX - bounds.width) < 0.5 && abs(vScroller.frame.height - (bounds.height - scrollerW)) < 0.5
+        hScroller.accessibilityOrientation() == .horizontal && vScroller.accessibilityOrientation() == .vertical
+            && abs(vScroller.frame.maxX - bounds.width) < 0.5 && abs(vScroller.frame.height - (bounds.height - scrollerW)) < 0.5
             && abs(hScroller.frame.maxY - bounds.height) < 0.5 && abs(hScroller.frame.width - (bounds.width - scrollerW)) < 0.5
     }
     /// Scrolled rows/columns that fit in the view now.
