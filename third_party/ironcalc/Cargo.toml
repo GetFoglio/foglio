@@ -78,6 +78,10 @@ name = "gridlines"
 path = "tests/gridlines.rs"
 
 [[test]]
+name = "sheet_view_groups"
+path = "tests/sheet_view_groups.rs"
+
+[[test]]
 name = "optional_xf_id_import"
 path = "tests/optional_xf_id_import.rs"
 

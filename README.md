@@ -83,6 +83,8 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
   as a picture that moves and sizes with its cell (not Excel 365's rich-value "picture in cell" format,
   so it opens in every Excel as a normal picture over that cell); Excel 365 pictures in cells
   (`xl/richData`) are read as pictures placed in their cells.
+- The sheet's zoom, "show zeros" setting, default row height and AutoFilter (range and value lists) are read
+  from and saved to `.xlsx`; pictures that were grouped in the file are saved back as a group.
 - Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
 
 **Formulas** — ~500 Excel functions via a patched fork of the [IronCalc](https://github.com/ironcalc/IronCalc) engine
@@ -113,7 +115,7 @@ bars/icon sets, sparklines, threaded comments (shown as plain notes).
 ## Testing
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 76 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 78 UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```

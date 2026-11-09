@@ -133,6 +133,7 @@ pub(super) fn parse_picture<R: Read + Seek>(
         crop: crop_of(blip_fill),
         in_cell,
         z,
+        group: 0,
     })
 }
 
@@ -262,6 +263,13 @@ pub(super) fn parse_group_pictures<R: Read + Seek>(
     let outer = GroupTransform { scale: (sx, sy), offset: (-group_off.0 * sx, -group_off.1 * sy) };
     let Some(t) = outer.children_of(group) else { return out };
     collect_group(archive, ws, group, t, from, edit_as, drawing_rels, z, &mut out, 0);
+    // One group number per top-level group, so saving writes the group back.
+    if out.len() > 1 {
+        let id = ws.pictures.iter().map(|p| p.group).max().unwrap_or(0) + 1;
+        for p in &mut out {
+            p.group = id;
+        }
+    }
     out
 }
 
@@ -332,7 +340,7 @@ fn group_picture<R: Read + Seek>(
     let anchor = ChartAnchor { from: advance_anchor(ws, from, x0, y0), to: advance_anchor(ws, from, x0 + cx, y0 + cy) };
     let (name, descr) = names_of(pic);
     let image = store_image(&mut ws.images, &bytes);
-    Some(Picture { name, descr, image, anchor, cx, cy, edit_as, crop: crop_of(blip_fill), in_cell: false, z })
+    Some(Picture { name, descr, image, anchor, cx, cy, edit_as, crop: crop_of(blip_fill), in_cell: false, z, group: 0 })
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +529,7 @@ impl RichValueImages {
                 crop: PictureCrop::default(),
                 in_cell: true,
                 z,
+                group: 0,
             });
             z += 1;
         }

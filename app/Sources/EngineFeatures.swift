@@ -66,6 +66,25 @@ extension Workbook {
     func fontName(id: UInt8) -> String? { id == 0 ? nil : Workbook.take(foglio_font_name_by_id(rawPtr, id)) }
     func sheetColor(_ s: Int) -> UInt32 { foglio_sheet_color(rawPtr, UInt32(s)) }
     func setSheetColor(_ s: Int, _ rgb: UInt32) { _ = foglio_set_sheet_color(rawPtr, UInt32(s), rgb); notifyChanged() }
+
+    // MARK: sheet view (zoom, AutoFilter), saved to .xlsx
+    /// The sheet's saved zoom in percent, 0 when the file sets none.
+    func sheetZoom(_ s: Int) -> Int { Int(foglio_sheet_zoom(rawPtr, UInt32(s))) }
+    func setSheetZoom(_ s: Int, _ percent: Int) { _ = foglio_set_sheet_zoom(rawPtr, UInt32(s), UInt32(max(0, percent))) }
+
+    struct AutoFilterData: Codable, Equatable {
+        struct Column: Codable, Equatable { var col_id: Int; var values: [String]; var blank: Bool }
+        var range: String
+        var columns: [Column]
+    }
+    func autoFilter(_ s: Int) -> AutoFilterData? {
+        guard let json = Workbook.take(foglio_autofilter_get(rawPtr, UInt32(s))) else { return nil }
+        return try? JSONDecoder().decode(AutoFilterData.self, from: Data(json.utf8))
+    }
+    func setAutoFilter(_ s: Int, _ af: AutoFilterData?) {
+        let json = af.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        _ = foglio_autofilter_set(rawPtr, UInt32(s), json)
+    }
     func link(sheet: Int, row: Int, col: Int) -> (address: String, tooltip: String)? {
         guard let s = Workbook.take(foglio_link_get(rawPtr, UInt32(sheet), Int32(row + 1), Int32(col + 1))),
               let d = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] else { return nil }

@@ -78,6 +78,32 @@ fn split_external_target(target: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// Foglio fork: the `<autoFilter>` of the worksheet (after `<sheetData>`, before `<mergeCells>`), or "".
+fn auto_filter_element(worksheet: &Worksheet) -> String {
+    let Some(af) = &worksheet.auto_filter else { return String::new() };
+    if af.range.is_empty() {
+        return String::new();
+    }
+    let mut columns = String::new();
+    for c in &af.columns {
+        let blank = if c.blank { " blank=\"1\"" } else { "" };
+        let values: String = c
+            .values
+            .iter()
+            .map(|v| format!("<filter val=\"{}\"/>", crate::export::escape::escape_xml(v)))
+            .collect();
+        columns.push_str(&format!(
+            "<filterColumn colId=\"{}\"><filters{blank}>{values}</filters></filterColumn>",
+            c.col_id
+        ));
+    }
+    if columns.is_empty() {
+        format!("<autoFilter ref=\"{}\"/>", af.range)
+    } else {
+        format!("<autoFilter ref=\"{}\">{columns}</autoFilter>", af.range)
+    }
+}
+
 /// The `<hyperlinks>` section of the worksheet or an empty string if there are none.
 /// External links reference a relationship (`rId1`, `rId2`...) in the sheet rels part,
 /// see [`get_worksheet_xml_rels`].
@@ -666,6 +692,22 @@ pub(crate) fn get_worksheet_xml(
         format!(r#"<selection activeCell="{active_cell}" sqref="{sqref}"/>"#)
     };
 
+    // Foglio fork: sheet zoom, default row height and AutoFilter
+    let mut zoom = if worksheet.zoom > 0 && worksheet.zoom != 100 {
+        format!(" zoomScale=\"{0}\" zoomScaleNormal=\"{0}\"", worksheet.zoom)
+    } else {
+        String::new()
+    };
+    if !worksheet.show_zeros {
+        zoom.insert_str(0, " showZeros=\"0\"");
+    }
+    let sheet_format_pr = if worksheet.default_row_height > 0.0 {
+        format!("<sheetFormatPr defaultRowHeight=\"{}\" customHeight=\"1\"/>", worksheet.default_row_height)
+    } else {
+        String::new()
+    };
+    let auto_filter_section = auto_filter_element(worksheet);
+
     let (cf_sections, cf_ext_lst) =
         get_conditional_formatting_xml(&worksheet.conditional_formatting);
 
@@ -683,14 +725,16 @@ pub(crate) fn get_worksheet_xml(
   {sheet_pr}\
   <dimension ref=\"{dimension}\"/>\
   <sheetViews>\
-    <sheetView workbookViewId=\"0\"{show_grid_lines}{tab_selected}>\
+    <sheetView workbookViewId=\"0\"{show_grid_lines}{tab_selected}{zoom}>\
         {pane}\
     </sheetView>\
   </sheetViews>\
+  {sheet_format_pr}\
   {cols}\
   <sheetData>\
   {sheet_data}\
   </sheetData>\
+  {auto_filter_section}\
   {merge_cells_section}\
   {cf_sections}\
   {data_validations_section}\

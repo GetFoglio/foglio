@@ -32,6 +32,8 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     /// Fresh view state for the current sheet (also after the sheet under us was deleted).
     func resetForSheet() {
         hidePopups()
+        let z = book.sheetZoom(sheet)   // each sheet keeps its own zoom, like Excel (100 % when the file sets none)
+        zoom = z > 0 ? CGFloat(z) / 100 : 1
         offset = .zero
         active = CellRef(row: 0, col: 0); cursor = active
         selection = GridRange(active, active)
@@ -52,7 +54,11 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
             // Pinch, ⌘-scroll and View ▸ Zoom change it here: keep the status bar's slider and percentage in step.
-            if zoom != oldValue { delegate?.gridZoomChanged(self) }
+            if zoom != oldValue {
+                delegate?.gridZoomChanged(self)
+                let pct = Int((zoom * 100).rounded())
+                if pct != (book.sheetZoom(sheet) == 0 ? 100 : book.sheetZoom(sheet)) { book.setSheetZoom(sheet, pct == 100 ? 0 : pct) }
+            }
         }
     }
 
@@ -199,12 +205,23 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     var formatPainterArmed = false { didSet { window?.invalidateCursorRects(for: self) } }
 
     // AutoFilter (one table per sheet)
-    private(set) var filters: [Int: FilterState] = [:]
+    /// Kept in the workbook too (saved as the sheet's `<autoFilter>`), see `storeFilter`.
+    private(set) var filters: [Int: FilterState] = [:] {
+        didSet {
+            for s in Set(oldValue.keys).union(filters.keys) where !filtersEqual(oldValue[s], filters[s]) { storeFilter(s) }
+        }
+    }
     private var filterPopover: NSPopover?
 
     init(book: Workbook) {
         self.book = book
         super.init(frame: .zero)
+        // The file's zoom of the first sheet and its saved AutoFilters
+        let z = book.sheetZoom(0)
+        if z > 0 { zoom = min(4, max(0.25, CGFloat(z) / 100)) }
+        for s in book.sheetNames.indices {
+            if let f = loadFilter(s) { filters[s] = f }
+        }
         painter.fontNameForId = { [weak book] id in book?.fontName(id: id) }
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -2080,6 +2097,49 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     /// Filters are tied to row/column positions: structural edits and undo drop them (rows stay as they are).
     func clearFilterState() { if filters[sheet] != nil { filters[sheet] = nil; needsDisplay = true } }
     func clearAllFilters() { filters.removeAll(); needsDisplay = true }
+
+    private func filtersEqual(_ a: FilterState?, _ b: FilterState?) -> Bool {
+        a?.range == b?.range && a?.excluded == b?.excluded
+    }
+
+    /// Writes the sheet's filter to the workbook as an `<autoFilter>`: the range and, per filtered column,
+    /// the values that stay visible (Excel stores the shown values, Foglio the hidden ones).
+    private func storeFilter(_ s: Int) {
+        guard let f = filters[s] else { book.setAutoFilter(s, nil); return }
+        var columns: [Workbook.AutoFilterData.Column] = []
+        if let rows = f.dataRows {
+            for (col, excluded) in f.excluded.sorted(by: { $0.key < $1.key }) where !excluded.isEmpty {
+                var all = Set<String>(), blanks = false
+                let cells = book.viewport(sheet: s, rows: rows, cols: col...col)
+                for c in cells where !c.text.isEmpty { all.insert(c.text) }
+                if cells.filter({ !$0.text.isEmpty }).count < rows.count { blanks = true }
+                let shown = all.subtracting(excluded).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+                columns.append(.init(col_id: col - f.range.c0, values: shown, blank: blanks && !excluded.contains("")))
+            }
+        }
+        book.setAutoFilter(s, .init(range: f.range.a1, columns: columns))
+    }
+
+    /// The filter saved in the file. A range holding only the header row (Excel writes that while the data grows)
+    /// takes the data rows below it down to the sheet's last used row.
+    private func loadFilter(_ s: Int) -> FilterState? {
+        guard let af = book.autoFilter(s), var r = parseA1Range(af.range) else { return nil }
+        if r.r1 == r.r0 { r.r1 = max(r.r0, book.layout(sheet: s).maxRow) }
+        var f = FilterState(range: r)
+        guard let rows = f.dataRows else { return f }
+        for col in af.columns {
+            let c = r.c0 + col.col_id
+            guard c <= r.c1 else { continue }
+            let cells = book.viewport(sheet: s, rows: rows, cols: c...c)
+            var all = Set(cells.map(\.text).filter { !$0.isEmpty })
+            if cells.filter({ !$0.text.isEmpty }).count < rows.count { all.insert("") }
+            var shown = Set(col.values)
+            if col.blank { shown.insert("") }
+            let excluded = all.subtracting(shown)
+            if !excluded.isEmpty { f.excluded[c] = excluded }
+        }
+        return f
+    }
 
     @objc func toggleFilter(_ sender: Any?) {
         guard commitIfEditing() else { return }

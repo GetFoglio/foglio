@@ -774,6 +774,10 @@ struct SheetView {
     frozen_columns: i32,
     frozen_rows: i32,
     show_grid_lines: bool,
+    /// Foglio fork: `zoomScale` in percent, 0 when absent
+    zoom: u16,
+    /// Foglio fork: `showZeros`
+    show_zeros: bool,
 }
 
 impl Default for SheetView {
@@ -782,8 +786,51 @@ impl Default for SheetView {
             frozen_rows: 0,
             frozen_columns: 0,
             show_grid_lines: true,
+            zoom: 0,
+            show_zeros: true,
         }
     }
+}
+
+/// Foglio fork: the sheet's default row height in points, when the file sets one that differs from the usual
+/// (`<sheetFormatPr defaultRowHeight="11.45" customHeight="1"/>`). Ordinary defaults (Excel's 14.4–16 pt for
+/// its default font) return 0 so the application keeps its own default row height.
+fn get_default_row_height(ws: &XmlNode) -> f64 {
+    let Some(pr) = ws.children().find(|n| n.has_tag_name("sheetFormatPr")) else { return 0.0 };
+    let Some(h) = pr.attribute("defaultRowHeight").and_then(|v| v.trim().parse::<f64>().ok()) else { return 0.0 };
+    if !(1.0..=409.0).contains(&h) {
+        return 0.0;
+    }
+    let custom = matches!(pr.attribute("customHeight").map(str::trim), Some("1") | Some("true"));
+    if custom || !(12.0..=20.0).contains(&h) {
+        h
+    } else {
+        0.0
+    }
+}
+
+/// Foglio fork: the worksheet's `<autoFilter>` (tables have their own, handled in tables.rs).
+/// `<autoFilter ref="A1:L40"><filterColumn colId="2"><filters blank="1"><filter val="x"/></filters></filterColumn></autoFilter>`
+fn get_auto_filter(ws: &XmlNode) -> Option<ironcalc_base::types::AutoFilter> {
+    let af = ws.children().find(|n| n.has_tag_name("autoFilter"))?;
+    let range = af.attribute("ref")?.trim().to_string();
+    if range.is_empty() {
+        return None;
+    }
+    let mut columns = Vec::new();
+    for fc in af.children().filter(|n| n.has_tag_name("filterColumn")) {
+        let Some(col_id) = fc.attribute("colId").and_then(|v| v.trim().parse::<u32>().ok()) else { continue };
+        // Only value lists are supported; custom/top10/dynamic filters show everything.
+        let Some(filters) = fc.children().find(|n| n.has_tag_name("filters")) else { continue };
+        let blank = matches!(filters.attribute("blank").map(str::trim), Some("1") | Some("true"));
+        let values = filters
+            .children()
+            .filter(|n| n.has_tag_name("filter"))
+            .filter_map(|n| n.attribute("val").map(decode_xlsx_escapes))
+            .collect();
+        columns.push(ironcalc_base::types::FilterColumn { col_id, values, blank });
+    }
+    Some(ironcalc_base::types::AutoFilter { range, columns })
 }
 
 fn get_sheet_view(ws: &XmlNode) -> SheetView {
@@ -835,6 +882,13 @@ fn get_sheet_view(ws: &XmlNode) -> SheetView {
     }
 
     let sheet_view = sheet_view[0];
+    // Foglio fork: the sheet's zoom (10–400 %)
+    let zoom = sheet_view
+        .attribute("zoomScale")
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|z| (10..=400).contains(z))
+        .unwrap_or(0);
+    let show_zeros = !matches!(sheet_view.attribute("showZeros").map(str::trim), Some("0") | Some("false"));
     // Foglio fork: xsd:boolean, "true"/"false" as well as "1"/"0".
     let show_grid_lines = !matches!(sheet_view.attribute("showGridLines").map(str::trim), Some("0") | Some("false"));
 
@@ -860,6 +914,8 @@ fn get_sheet_view(ws: &XmlNode) -> SheetView {
         frozen_rows,
         frozen_columns,
         show_grid_lines,
+        zoom,
+        show_zeros,
     }
 }
 
@@ -962,6 +1018,10 @@ pub(super) fn load_sheet<R: Read + std::io::Seek>(
         pictures: vec![], // Foglio fork: pictures, filled in by load_sheets
         images: HashMap::new(), // Foglio fork: pictures
         data_validations: super::annotations::load_data_validations(ws), // Foglio fork
+        zoom: sheet_view.zoom, // Foglio fork
+        show_zeros: sheet_view.show_zeros, // Foglio fork
+        default_row_height: get_default_row_height(ws), // Foglio fork
+        auto_filter: get_auto_filter(ws), // Foglio fork
     })
 }
 

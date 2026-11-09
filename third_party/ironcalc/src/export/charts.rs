@@ -194,18 +194,42 @@ fn chart_anchor_xml(chart: &Chart, id: usize, rel: usize) -> String {
 /// pictures, see pictures.rs and `ironcalc_base::pictures::drawing_order`).
 fn drawing_xml(ws: &Worksheet, charts: &[(usize, usize)], media: &pictures::Media) -> String {
     let mut anchors = String::new();
-    for (k, object) in drawing_order(ws).into_iter().enumerate() {
-        let id = k + 2;
-        match object {
+    let mut id = 2;
+    let mut groups_done = std::collections::HashSet::new();
+    let order = drawing_order(ws);
+    for object in &order {
+        match *object {
             DrawingObject::Chart(i) => {
                 if charts.iter().any(|(ci, _)| *ci == i) {
                     anchors.push_str(&chart_anchor_xml(&ws.charts[i], id, i + 1));
                 }
+                id += 1;
             }
             DrawingObject::Picture(i) => {
-                if let Some(xml) = pictures::anchor_xml(ws, &ws.pictures[i], id, media) {
+                let p = &ws.pictures[i];
+                // Foglio fork: grouped pictures go out as one group, where its first member is in the stack.
+                if p.group != 0 {
+                    if !groups_done.insert(p.group) {
+                        continue;
+                    }
+                    let members: Vec<&ironcalc_base::pictures::Picture> = order
+                        .iter()
+                        .filter_map(|o| match *o {
+                            DrawingObject::Picture(j) if ws.pictures[j].group == p.group => Some(&ws.pictures[j]),
+                            _ => None,
+                        })
+                        .collect();
+                    if members.len() > 1 {
+                        if let Some(xml) = pictures::group_anchor_xml(ws, &members, &mut id, media) {
+                            anchors.push_str(&xml);
+                        }
+                        continue;
+                    }
+                }
+                if let Some(xml) = pictures::anchor_xml(ws, p, id, media) {
                     anchors.push_str(&xml);
                 }
+                id += 1;
             }
         }
     }

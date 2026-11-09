@@ -676,6 +676,10 @@ impl Worksheet {
                 return Ok(r.height * constants::ROW_HEIGHT_FACTOR);
             }
         }
+        // Foglio fork: the sheet's own default height, when the file sets one
+        if self.default_row_height > 0.0 {
+            return Ok(self.default_row_height * constants::ROW_HEIGHT_FACTOR);
+        }
         Ok(constants::DEFAULT_ROW_HEIGHT)
     }
 

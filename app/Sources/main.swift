@@ -314,6 +314,21 @@ enum UIScript {
                 guard let w = c.window, let ref = parseA1(arg) else { break }
                 let p = c.grid.windowPoint(for: ref)
                 sendClick(at: p, count: cmd.hasPrefix("dbl") ? 2 : 1, mods: cmd.hasPrefix("shift") ? .shift : [], right: cmd.hasPrefix("right"), to: w)
+            case "view": // zoom and AutoFilter of the current sheet (as shown and as saved)
+                let g = c.grid!
+                let f = g.filters[g.sheet]
+                let ex = f?.excluded.sorted { $0.key < $1.key }.map { "\(columnName($0.key)):\($0.value.sorted().joined(separator: "|"))" }.joined(separator: ",") ?? ""
+                print("VIEW zoom=\(Int((g.zoom * 100).rounded())) saved=\(g.book.sheetZoom(g.sheet)) filter=\(f?.range.a1 ?? "none") excluded=\(ex)")
+            case "shown": // the text the grid shows in a cell (after "show zeros" and number formats)
+                if let ref = parseA1(arg) {
+                    let cell = c.grid.book.viewport(sheet: c.grid.sheet, rows: ref.row...ref.row, cols: ref.col...ref.col).first
+                    print("SHOWN \(arg)=\(cell?.text ?? "")")
+                }
+            case "filtercol": // filtercol B a|b  — hides the listed values of column B (the filter must exist)
+                let parts = arg.split(separator: " ", maxSplits: 1).map(String.init)
+                if let col = parts.first.flatMap({ parseA1($0 + "1")?.col }) {
+                    c.grid.applyFilter(col: col, excluded: Set((parts.count > 1 ? parts[1] : "").split(separator: "|").map(String.init)))
+                }
             case "state":
                 let g = c.grid!
                 let fr = g.window?.firstResponder

@@ -648,3 +648,51 @@ pub unsafe extern "C" fn foglio_summarize(
         }
     }
 }
+
+// ---------- sheet view: zoom, AutoFilter (Foglio fork) ----------
+
+/// The zoom saved for the sheet, in percent (0 = not set).
+#[no_mangle]
+pub extern "C" fn foglio_sheet_zoom(b: *const FoglioBook, sheet: u32) -> u32 {
+    let Some(b) = book_ref(b) else { return 0 };
+    guard(0, || b.model.get_model().workbook.worksheets.get(sheet as usize).map_or(0, |w| w.zoom as u32))
+}
+
+/// Stores the sheet's zoom (10–400 %, 0 = default); saved to `.xlsx`. Not undoable.
+#[no_mangle]
+pub extern "C" fn foglio_set_sheet_zoom(b: *mut FoglioBook, sheet: u32, zoom: u32) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    let zoom = if zoom == 0 { 0 } else { zoom.clamp(10, 400) as u16 };
+    guard(-1, || rc(b.model.set_sheet_zoom(sheet, zoom)))
+}
+
+/// The sheet's AutoFilter as JSON `{"range":"A1:L40","columns":[{"col_id":2,"values":["x"],"blank":false}]}`,
+/// NULL when there is none.
+#[no_mangle]
+pub extern "C" fn foglio_autofilter_get(b: *const FoglioBook, sheet: u32) -> *mut c_char {
+    let Some(b) = book_ref(b) else { return ptr::null_mut() };
+    guard(ptr::null_mut(), || {
+        match b.model.get_model().workbook.worksheets.get(sheet as usize).and_then(|w| w.auto_filter.as_ref()) {
+            Some(af) => serde_json::to_string(af).map(to_c).unwrap_or(ptr::null_mut()),
+            None => ptr::null_mut(),
+        }
+    })
+}
+
+/// Sets the sheet's AutoFilter from JSON (same shape as `foglio_autofilter_get`); NULL or "" removes it.
+#[no_mangle]
+pub unsafe extern "C" fn foglio_autofilter_set(b: *mut FoglioBook, sheet: u32, json: *const c_char) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    let text = cstr(json).unwrap_or("").trim().to_string();
+    guard(-1, || {
+        let af = if text.is_empty() {
+            None
+        } else {
+            match serde_json::from_str::<ironcalc::base::types::AutoFilter>(&text) {
+                Ok(af) => Some(af),
+                Err(_) => return -1,
+            }
+        };
+        rc(b.model.set_auto_filter(sheet, af))
+    })
+}

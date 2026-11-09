@@ -823,6 +823,19 @@ impl<'a> UserModel<'a> {
         Ok(())
     }
 
+    /// Foglio fork: sets the zoom of a sheet in percent (0 = default). A view setting: not undoable.
+    pub fn set_sheet_zoom(&mut self, sheet: u32, zoom: u16) -> Result<(), String> {
+        self.model.workbook.worksheet_mut(sheet)?.zoom = zoom;
+        Ok(())
+    }
+
+    /// Foglio fork: sets or removes the sheet's AutoFilter. Not undoable (the filtered rows are hidden and
+    /// shown by the application, which records those changes itself).
+    pub fn set_auto_filter(&mut self, sheet: u32, auto_filter: Option<crate::types::AutoFilter>) -> Result<(), String> {
+        self.model.workbook.worksheet_mut(sheet)?.auto_filter = auto_filter;
+        Ok(())
+    }
+
     /// Removes cells contents and style
     ///
     /// See also:

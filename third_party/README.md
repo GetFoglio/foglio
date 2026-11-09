@@ -291,6 +291,19 @@ resolving to these copies. Every Foglio change is marked with a
   across the workbook and deduplicated, stored uncompressed; `<Default>`
   content types for the image extensions; drawing rels `rIdImgN`.
 
+### Sheet view, AutoFilter, grouped pictures
+
+- `Worksheet` gains `zoom` (`sheetView/@zoomScale`), `show_zeros` (`sheetView/@showZeros`),
+  `default_row_height` (`sheetFormatPr/@defaultRowHeight`, kept only when the file changed it: `customHeight`
+  or outside 12–20 pt) and `auto_filter` (`<autoFilter ref>` with value lists per `filterColumn`). All four are
+  read from and written to `.xlsx` (`import/worksheets.rs`, `export/worksheets.rs`; `<autoFilter>` right after
+  `<sheetData>`); `Worksheet::row_height` uses the sheet's default. `UserModel::set_sheet_zoom` and
+  `set_auto_filter` set them (view settings, not undoable).
+- `Picture::group`: pictures that came from one group shape share a number (`import/pictures.rs`) and are
+  written back as one `xdr:grpSp` whose child coordinates are the sheet's EMU (`export/pictures.rs`,
+  `group_anchor_xml`); nested groups become one level. New pictures (`add_picture`) are never grouped.
+- Test: `ironcalc/tests/sheet_view_groups.rs`.
+
 ### Tests added
 * `ironcalc_base/src/test/test_incremental.rs`: targeted tests, randomized
   edit sequences (400 sessions × 60 edits in the default run; 2000 × 120 in

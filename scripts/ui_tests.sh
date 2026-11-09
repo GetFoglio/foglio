@@ -96,7 +96,7 @@ run "growing an empty window 1200x800 to 1600x1100" "setframe 1200 800;; visible
 # A price list laid out like the ones Excel users send around (core/tests/fixtures/make_price_list_fixture.py):
 # header frozen as "frozenSplit", product photos in a group shape, merged rows with borders on every cell
 FILE=$ROOT/core/tests/fixtures/price_list_layout.xlsx run "price list: frozen header stays clickable after scrolling" \
-  "scroll 0 -300;; click D20;; state;; click A1;; state;; shiftclick F25;; state;; pic list" \
+  "setframe 1400 950;; scroll 0 -300;; click D20;; state;; click A1;; state;; shiftclick F25;; state;; pic list" \
   "active=C20 sel=C20:E20" "active=A1 sel=A1" "active=A1 sel=A1:F25" "PICTURES 3" "PICTURE 2 from=B1 to=B1" "incell=false"
 # Drag selection follows the pointer both ways (the range is always anchor..cell under the pointer, never accumulated)
 run "drag selection shrinks back" "select C4:E4;; merge;; freeze A3;; mousedown B5;; mousedrag D12;; state;; mousedrag B6;; state;; mousedrag A5;; state;; mousedrag E5;; state;; mouseup;; mousedown B3;; mousedrag D4;; state;; mousedrag B3;; mouseup;; state" \
@@ -106,6 +106,12 @@ run "drag selection at 150% after autoscroll" "freeze A3;; zoom 1.5;; mousedown 
 FILE=$ROOT/core/tests/fixtures/price_list_layout.xlsx run "drag selection over merges and the frozen header" \
   "scroll 0 -200;; mousedown B20;; mousedrag D25;; state;; mousedrag B14;; state;; mousedrag A1;; state;; mousedrag B21;; mouseup;; state" \
   "sel=B20:E25" "sel=B14:B20" "sel=A1:E20" "active=B20 sel=B20:B21"
+# Sheet view saved in the file: zoom, "show zeros" off, AutoFilter on the header row (synthetic fixture)
+FILE=$ROOT/core/tests/fixtures/sheet_view.xlsx run "sheet zoom, hidden zeros and AutoFilter from the file" \
+  "view;; shown C2;; shown C5;; zoom 1.2;; filtercol C 10;; view;; savexlsx /tmp/foglio-ui-sheetview.xlsx" \
+  "VIEW zoom=150 saved=150 filter=A1:C13 excluded=B:B" "SHOWN C2=5" "SHOWN C5=" "VIEW zoom=120 saved=120 filter=A1:C13 excluded=B:B,C:10"
+FILE=/tmp/foglio-ui-sheetview.xlsx run "sheet zoom and AutoFilter saved and reopened" "view;; shown C5" \
+  "VIEW zoom=120 saved=120 filter=A1:C13 excluded=B:B,C:10" "SHOWN C5="
 run "zoom from the menu updates the status bar" "key cmd+opt+-;; zoomui;; key cmd+opt+-;; zoomui" "ZOOMUI 80% slider=80 grid=80" "ZOOMUI 65% slider=65 grid=65"
 if [[ -f ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx ]]; then
   out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)

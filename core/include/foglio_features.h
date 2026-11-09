@@ -157,6 +157,17 @@ int32_t foglio_summarize(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, 
                          int32_t c1, int32_t group_col, int32_t value_col, int32_t agg,
                          const char *target_name, char **err_out);
 
+/* ---------- sheet view (Foglio fork) ---------- */
+
+/* Zoom saved for the sheet in percent, 0 = not set. Setting it is not undoable; it is saved to .xlsx. */
+uint32_t foglio_sheet_zoom(const FoglioBook *b, uint32_t sheet);
+int32_t foglio_set_sheet_zoom(FoglioBook *b, uint32_t sheet, uint32_t zoom);
+
+/* The sheet's AutoFilter as JSON {"range":"A1:L40","columns":[{"col_id":2,"values":["x"],"blank":false}]},
+   NULL when there is none (free with foglio_string_free). Setting NULL or "" removes it. Not undoable. */
+char *foglio_autofilter_get(const FoglioBook *b, uint32_t sheet);
+int32_t foglio_autofilter_set(FoglioBook *b, uint32_t sheet, const char *json);
+
 #ifdef __cplusplus
 }
 #endif

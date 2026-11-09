@@ -60,6 +60,10 @@ impl<'a> Model<'a> {
             pictures: vec![], // Foglio fork: pictures
             images: HashMap::new(), // Foglio fork: pictures
             data_validations: vec![], // Foglio fork: data validation
+            zoom: 0, // Foglio fork
+            show_zeros: true, // Foglio fork
+            default_row_height: 0.0, // Foglio fork
+            auto_filter: None, // Foglio fork
         }
     }
 

@@ -88,6 +88,8 @@ fn kind_of(b: &FoglioBook, sheet: u32, row: i32, col: i32) -> u8 {
 pub extern "C" fn foglio_viewport(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> *mut FoglioViewport {
     let Some(b) = book(b) else { return ptr::null_mut() };
     guard(ptr::null_mut(), || {
+        // Foglio fork: sheets saved with "show zeros" off display cells holding 0 as blank (like Excel)
+        let hide_zeros = b.model.get_model().workbook.worksheets.get(sheet as usize).is_some_and(|w| !w.show_zeros);
         let coords: Vec<(i32, i32)> = {
             let model = b.model.get_model();
             let Some(ws) = model.workbook.worksheets.get(sheet as usize) else { return ptr::null_mut() };
@@ -104,8 +106,15 @@ pub extern "C" fn foglio_viewport(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i
         let mut cells = Vec::with_capacity(coords.len());
         let mut text: Vec<u8> = Vec::with_capacity(coords.len() * 8);
         for (row, col) in coords {
-            let s = b.model.get_formatted_cell_value(sheet, row, col).unwrap_or_default();
+            let mut s = b.model.get_formatted_cell_value(sheet, row, col).unwrap_or_default();
             let kind = kind_of(b, sheet, row, col);
+            if hide_zeros && kind == 1 {
+                if let Ok(CellValue::Number(n)) = b.model.get_model().get_cell_value_by_index(sheet, row, col) {
+                    if n == 0.0 {
+                        s.clear();
+                    }
+                }
+            }
             let st = b.style_info(sheet, row, col);
             let off = text.len() as u32;
             text.extend_from_slice(s.as_bytes());
@@ -224,11 +233,17 @@ pub extern "C" fn foglio_layout(b: *const FoglioBook, sheet: u32) -> *mut Foglio
         }
         cols.sort_by_key(|e| e.index);
         cols.dedup_by_key(|e| e.index);
+        // Foglio fork: a sheet may set its own default row height (sheetFormatPr/@defaultRowHeight)
+        let default_row = if ws.default_row_height > 0.0 {
+            ws.default_row_height * DEFAULT_ROW_PX / 16.0 // the engine's points → pixels factor (16 pt = 25 px)
+        } else {
+            DEFAULT_ROW_PX
+        };
         let mut rows = Vec::new();
         for r in &ws.rows {
             if r.hidden || r.custom_height {
-                let h = model.get_row_height(sheet, r.r).unwrap_or(DEFAULT_ROW_PX);
-                if r.hidden || (h - DEFAULT_ROW_PX).abs() > 0.01 {
+                let h = model.get_row_height(sheet, r.r).unwrap_or(default_row);
+                if r.hidden || (h - default_row).abs() > 0.01 {
                     rows.push(FoglioAxisEntry { index: r.r, hidden: r.hidden as u8, size: if r.hidden { 0.0 } else { h } });
                 }
             }
@@ -239,7 +254,7 @@ pub extern "C" fn foglio_layout(b: *const FoglioBook, sheet: u32) -> *mut Foglio
         let mut owned = Box::new(LayoutOwned {
             header: FoglioLayout {
                 cols: ptr::null(), ncols: 0, rows: ptr::null(), nrows: 0,
-                default_col: DEFAULT_COL_PX, default_row: DEFAULT_ROW_PX,
+                default_col: DEFAULT_COL_PX, default_row,
                 frozen_rows: ws.frozen_rows, frozen_cols: ws.frozen_columns, show_grid: ws.show_grid_lines as u8,
                 max_row: dim.max_row, max_col: dim.max_column,
             },

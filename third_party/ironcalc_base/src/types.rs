@@ -245,6 +245,33 @@ pub struct Worksheet {
     pub images: HashMap<String, Vec<u8>>,
     /// Foglio fork: data validation rules (see data_validation.rs)
     pub data_validations: Vec<crate::data_validation::DataValidation>,
+    /// Foglio fork: whether cells holding the number 0 show it (`sheetView/@showZeros`, true by default)
+    pub show_zeros: bool,
+    /// Foglio fork: zoom of the sheet in percent (`sheetView/@zoomScale`); 0 = not set (100 %)
+    pub zoom: u16,
+    /// Foglio fork: height of the rows that have none of their own, in points
+    /// (`sheetFormatPr/@defaultRowHeight` when the file changed it); 0 = the application default
+    pub default_row_height: f64,
+    /// Foglio fork: the sheet's AutoFilter (`<autoFilter>`), if any
+    pub auto_filter: Option<AutoFilter>,
+}
+
+/// Foglio fork: a worksheet AutoFilter (ECMA-376-1 18.3.1.2). `range` is the header row plus the data
+/// rows (e.g. "A1:L40"); each column with a value filter lists the values that are shown.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AutoFilter {
+    pub range: String,
+    pub columns: Vec<FilterColumn>,
+}
+
+/// Foglio fork: the values shown in one AutoFilter column (`colId` is 0-based from the range's first column).
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct FilterColumn {
+    pub col_id: u32,
+    /// Shown values, as displayed text
+    pub values: Vec<String>,
+    /// Whether blank cells are shown
+    pub blank: bool,
 }
 
 /// Internal representation of Excel's sheet_data

@@ -129,6 +129,10 @@ pub struct Picture {
     /// sheet: higher is in front
     #[serde(default)]
     pub z: i32,
+    /// Group shape (`xdr:grpSp`) the picture belongs to in the file, 0 = none. Pictures sharing a
+    /// group number are written back as one group (nested groups become one level).
+    #[serde(default)]
+    pub group: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +463,7 @@ impl UserModel<'_> {
         }
         picture.z = next_z(ws);
         picture.crop = picture.crop.sanitized();
+        picture.group = 0; // a new or pasted picture is on its own
         pictures.push(picture);
         let index = pictures.len() - 1;
         self.set_pictures(sheet, pictures)?;
