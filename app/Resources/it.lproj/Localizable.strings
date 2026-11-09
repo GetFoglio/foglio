@@ -194,3 +194,8 @@
 "Settings…" = "Impostazioni…";
 "Type:" = "Tipo:";
 "Use 1000 separator" = "Usa separatore delle migliaia";
+"Some features will be lost in CSV format" = "Alcune funzionalità andranno perse nel formato CSV";
+"CSV keeps only the values of the current sheet. Other sheets, formulas and formatting will not be saved." = "Il CSV conserva solo i valori del foglio corrente. Gli altri fogli, le formule e la formattazione non verranno salvati.";
+"CSV keeps only values. Formulas and formatting will not be saved." = "Il CSV conserva solo i valori. Formule e formattazione non verranno salvate.";
+"Save as CSV" = "Salva come CSV";
+"Save as Excel Workbook…" = "Salva come cartella di lavoro Excel…";

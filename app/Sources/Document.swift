@@ -39,6 +39,43 @@ final class SpreadsheetDocument: NSDocument {
         }
     }
 
+    private var csvWarningAccepted = false
+
+    /// Excel-style warning before a lossy CSV save; offers to keep the workbook format instead.
+    override func save(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType,
+                       completionHandler: @escaping (Error?) -> Void) {
+        let isCSV = typeName == FileTypes.csv || typeName == FileTypes.tsv
+        guard isCSV, saveOperation != .autosaveElsewhereOperation, !csvWarningAccepted, let w = windowController?.window else {
+            super.save(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
+            return
+        }
+        let a = NSAlert()
+        a.messageText = L("Some features will be lost in CSV format")
+        a.informativeText = book.sheetNames.count > 1
+            ? L("CSV keeps only the values of the current sheet. Other sheets, formulas and formatting will not be saved.")
+            : L("CSV keeps only values. Formulas and formatting will not be saved.")
+        a.addButton(withTitle: L("Save as CSV"))
+        a.addButton(withTitle: L("Save as Excel Workbook…"))
+        a.addButton(withTitle: L("Cancel"))
+        a.beginSheetModal(for: w) { r in
+            switch r {
+            case .alertFirstButtonReturn:
+                self.csvWarningAccepted = true
+                self.saveSkippingWarning(to: url, ofType: typeName, for: saveOperation, completionHandler: completionHandler)
+            case .alertSecondButtonReturn:
+                completionHandler(nil)
+                DispatchQueue.main.async { self.saveAs(nil) }
+            default:
+                completionHandler(CocoaError(.userCancelled))
+            }
+        }
+    }
+
+    private func saveSkippingWarning(to url: URL, ofType typeName: String, for op: NSDocument.SaveOperationType,
+                                     completionHandler: @escaping (Error?) -> Void) {
+        super.save(to: url, ofType: typeName, for: op, completionHandler: completionHandler)
+    }
+
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
         [FileTypes.xlsx, FileTypes.csv]
     }

@@ -273,6 +273,29 @@ enum UIScript {
                 let g = c.grid!
                 let fr = g.window?.firstResponder
                 print("STATE active=\(columnName(g.active.col))\(g.active.row + 1) sel=\(g.selection.a1) editing=\(g.isEditing) pointing=\(g.isPointing) responder=\(fr.map { String(describing: type(of: $0)) } ?? "nil") text=\((fr as? NSTextView)?.string ?? "")")
+            case "drag", "filldrag": // drag A1 C3  (filldrag starts at the selection's fill handle)
+                guard let w = c.window else { break }
+                let p = arg.split(separator: " ").map(String.init)
+                guard p.count == 2, let a = parseA1(p[0]), let b = parseA1(p[1]) else { break }
+                var start = c.grid.windowPoint(for: a)
+                if cmd.hasPrefix("fill") { start = c.grid.fillHandleWindowPoint() }
+                let end = c.grid.windowPoint(for: b)
+                func ev(_ t: NSEvent.EventType, _ pt: NSPoint) {
+                    if let e = NSEvent.mouseEvent(with: t, location: pt, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { NSApp.sendEvent(e) }
+                }
+                ev(.leftMouseDown, start)
+                for i in 1...5 { let t = CGFloat(i) / 5; ev(.leftMouseDragged, NSPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)) }
+                ev(.leftMouseUp, end)
+            case "header": // header C  or header 5
+                guard let w = c.window else { break }
+                if let col = parseA1(arg + "1")?.col, Int(arg) == nil {
+                    var p = c.grid.windowPoint(for: CellRef(row: 0, col: col)); p.y += c.grid.headerH * c.grid.zoom * 0.5 + 10
+                    sendClick(at: c.grid.headerPoint(col: col), count: 1, to: w)
+                    _ = p
+                } else if let r = Int(arg) {
+                    sendClick(at: c.grid.headerPoint(row: r - 1), count: 1, to: w)
+                }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "debug":
                 print("DEBUG keyWindow=\(NSApp.keyWindow != nil) isActive=\(NSApp.isActive) cycle=\(String(describing: c.grid.book.cycleReference("=B2*3", start: 3, end: 3))) cycle2=\(String(describing: c.grid.book.cycleReference("B2*3", start: 2, end: 2)))")

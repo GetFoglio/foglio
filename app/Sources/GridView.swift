@@ -1552,6 +1552,19 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         return convert(viewPoint, to: nil)
     }
 
+    func fillHandleWindowPoint() -> NSPoint {
+        let r = fillHandleRect(geo)
+        return convert(NSPoint(x: r.midX * zoom, y: r.midY * zoom), to: nil)
+    }
+    func headerPoint(col: Int) -> NSPoint {
+        let r = cellRect(0, col, geo)
+        return convert(NSPoint(x: r.midX * zoom, y: headerH / 2 * zoom), to: nil)
+    }
+    func headerPoint(row: Int) -> NSPoint {
+        let r = cellRect(row, 0, geo)
+        return convert(NSPoint(x: headerW / 2 * zoom, y: r.midY * zoom), to: nil)
+    }
+
     // MARK: - Benchmark
 
     func startAutoScroll(frames: Int) {
