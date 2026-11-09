@@ -881,3 +881,159 @@ pub extern "C" fn foglio_unique_values(b: *const FoglioBook, sheet: u32, col: i3
     }
     to_c(out.join("\n"))
 }
+
+// ---------- conditional formatting (Excel's "Highlight Cells Rules", Top/Bottom, Color Scales) ----------
+
+/// kind: 0 cell value (op: 0 =, 1 >, 2 >=, 3 <, 4 <=, 5 <>, 6 between, 7 not between),
+///       1 text contains (op: 0 contains, 1 not contains, 2 begins, 3 ends, 4 equals),
+///       2 duplicate values, 3 unique values, 4 top N (v1 = N), 5 bottom N, 6 above average, 7 below average,
+///       8 colour scale green-yellow-red, 9 colour scale red-yellow-green, 10 colour scale white-blue, 11 blanks, 12 errors.
+/// style: 0 light red fill + dark red text, 1 yellow fill + dark yellow text, 2 green fill + dark green text,
+///        3 light red fill, 4 red text, 5 bold.
+#[no_mangle]
+pub unsafe extern "C" fn foglio_add_cf(
+    b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32,
+    kind: u32, op: u32, v1: *const c_char, v2: *const c_char, style: u32,
+) -> i32 {
+    use ironcalc::base::cf_types::{CfRuleInput, Cfvo, ColorScaleThreshold, TextOperator, ValueOperator};
+    use ironcalc::base::types::{Dxf, DxfFont, Fill};
+    let Some(b) = book(b) else { return -1 };
+    let v1 = cstr(v1).unwrap_or("").to_string();
+    let v2 = cstr(v2).unwrap_or("").to_string();
+    let a = area(sheet, r0, c0, r1, c1);
+    let range = {
+        let col = |c: i32| ironcalc::base::expressions::utils::number_to_column(c).unwrap_or_default();
+        format!("{}{}:{}{}", col(a.column), a.row, col(a.column + a.width - 1), a.row + a.height - 1)
+    };
+    let rgb = |s: &str| Color::Rgb(s.to_string());
+    let format = {
+        let (fill, font, bold) = match style {
+            0 => (Some("#FFC7CE"), Some("#9C0006"), false),
+            1 => (Some("#FFEB9C"), Some("#9C5700"), false),
+            2 => (Some("#C6EFCE"), Some("#006100"), false),
+            3 => (Some("#FFC7CE"), None, false),
+            4 => (None, Some("#C00000"), false),
+            _ => (None, None, true),
+        };
+        let mut dxf = Dxf::default();
+        if let Some(f) = fill {
+            dxf.fill = Some(Fill { color: rgb(f) });
+        }
+        if font.is_some() || bold {
+            let mut df = DxfFont::default();
+            if let Some(c) = font {
+                df.color = rgb(c);
+            }
+            if bold {
+                df.b = Some(true);
+            }
+            dxf.font = Some(df);
+        }
+        dxf
+    };
+    // Values typed in a decimal-comma locale ("1,5") are stored the way Excel stores them ("1.5").
+    let num = |s: &str| -> String {
+        let t = s.trim();
+        let swapped = t.replace('.', "").replace(',', ".");
+        if t.parse::<f64>().is_err() && swapped.parse::<f64>().is_ok() { swapped } else { t.to_string() }
+    };
+    let quoted = |s: &str| -> String {
+        let n = num(s);
+        if n.parse::<f64>().is_ok() || n.starts_with('=') { n.trim_start_matches('=').to_string() } else { format!("\"{}\"", s.replace('"', "\"\"")) }
+    };
+    let scale = |colors: &[&str]| -> CfRuleInput {
+        let n = colors.len();
+        let thresholds = colors
+            .iter()
+            .enumerate()
+            .map(|(i, c)| ColorScaleThreshold {
+                cfvo: if i == 0 { Cfvo::Min } else if i == n - 1 { Cfvo::Max } else { Cfvo::Percentile(50.0) },
+                color: rgb(c),
+            })
+            .collect();
+        CfRuleInput::ColorScale { thresholds }
+    };
+    let rule = match kind {
+        0 => {
+            let operator = match op {
+                0 => ValueOperator::Equal,
+                1 => ValueOperator::GreaterThan,
+                2 => ValueOperator::GreaterThanOrEqual,
+                3 => ValueOperator::LessThan,
+                4 => ValueOperator::LessThanOrEqual,
+                5 => ValueOperator::NotEqual,
+                6 => ValueOperator::Between,
+                _ => ValueOperator::NotBetween,
+            };
+            let formula2 = if op >= 6 { Some(quoted(&v2)) } else { None };
+            CfRuleInput::CellIs { operator, formula: quoted(&v1), formula2, format, stop_if_true: false }
+        }
+        1 => {
+            let operator = match op {
+                0 => TextOperator::Contains,
+                1 => TextOperator::DoesNotContain,
+                2 => TextOperator::BeginsWith,
+                3 => TextOperator::EndsWith,
+                _ => TextOperator::Equals,
+            };
+            CfRuleInput::Text { operator, value: v1, format, stop_if_true: false }
+        }
+        2 => CfRuleInput::DuplicateValues { format, stop_if_true: false },
+        3 => CfRuleInput::UniqueValues { format, stop_if_true: false },
+        4 | 5 => {
+            let rank = v1.trim().parse::<u32>().unwrap_or(10).max(1);
+            if kind == 4 {
+                CfRuleInput::Top10 { rank, percent: false, format, stop_if_true: false }
+            } else {
+                CfRuleInput::Bottom10 { rank, percent: false, format, stop_if_true: false }
+            }
+        }
+        6 => CfRuleInput::AboveAverage { format, stop_if_true: false },
+        7 => CfRuleInput::BelowAverage { format, stop_if_true: false },
+        8 => scale(&["#63BE7B", "#FFEB84", "#F8696B"]),
+        9 => scale(&["#F8696B", "#FFEB84", "#63BE7B"]),
+        10 => scale(&["#FFFFFF", "#5A8AC6"]),
+        11 => CfRuleInput::Blanks { format, stop_if_true: false },
+        _ => CfRuleInput::Errors { format, stop_if_true: false },
+    };
+    let r = guard(-1, || rc(b.model.add_conditional_formatting(sheet, &range, rule)));
+    b.style_cache.clear();
+    r
+}
+
+/// Removes conditional-formatting rules whose range intersects the area (whole sheet when r0 == 0).
+#[no_mangle]
+pub extern "C" fn foglio_clear_cf(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    let target = area(sheet, r0.max(1), c0.max(1), r1.max(1), c1.max(1));
+    let whole = r0 <= 0;
+    let r = guard(-1, || {
+        let Ok(list) = b.model.get_conditional_formatting_list(sheet) else { return -1 };
+        let mut doomed: Vec<usize> = list
+            .iter()
+            .filter(|cf| whole || cf.range.split(' ').any(|part| range_intersects(part, &target)))
+            .map(|cf| cf.index)
+            .collect();
+        doomed.sort_unstable_by(|a, b| b.cmp(a)); // delete from the end so indices stay valid
+        for i in &doomed {
+            let _ = b.model.delete_conditional_formatting(sheet, *i as u32);
+        }
+        doomed.len() as i32
+    });
+    b.style_cache.clear();
+    r
+}
+
+fn range_intersects(a1: &str, t: &ironcalc::base::expressions::types::Area) -> bool {
+    use ironcalc::base::expressions::utils::column_to_number;
+    let parse = |s: &str| -> Option<(i32, i32)> {
+        let s = s.replace('$', "");
+        let split = s.find(|c: char| c.is_ascii_digit())?;
+        Some((s[split..].parse().ok()?, column_to_number(&s[..split]).ok()?))
+    };
+    let mut it = a1.split(':');
+    let Some(first) = it.next().and_then(parse) else { return false };
+    let last = it.next().and_then(parse).unwrap_or(first);
+    let (ar0, ac0, ar1, ac1) = (first.0.min(last.0), first.1.min(last.1), first.0.max(last.0), first.1.max(last.1));
+    !(ar1 < t.row || ar0 > t.row + t.height - 1 || ac1 < t.column || ac0 > t.column + t.width - 1)
+}

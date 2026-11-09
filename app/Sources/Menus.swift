@@ -146,6 +146,7 @@ enum Menus {
             item("Wrap Text", #selector(W.wrapAction(_:))),
             item("Merge & Center", #selector(GridView.mergeAndCenter(_:))),
             submenu("Borders", borderItems()),
+            ConditionalFormatMenu.menu(),
             .separator(),
             submenu("Row", [
                 item("Height…", #selector(GridView.rowHeight(_:))),

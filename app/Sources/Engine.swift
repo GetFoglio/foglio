@@ -211,6 +211,18 @@ final class Workbook {
     /// mode: 0 unmerge, 1 merge, 2 merge & center
     func merge(sheet: Int, _ r: GridRange, mode: Int32) { _ = foglio_merge(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c, mode); changed() }
 
+    // MARK: conditional formatting
+    func addConditionalFormat(sheet: Int, _ r: GridRange, kind: UInt32, op: UInt32 = 0, v1: String = "", v2: String = "", style: UInt32 = 0) -> Bool {
+        let ok = foglio_add_cf(ptr, UInt32(sheet), r.e0r, r.e0c, r.e1r, r.e1c, kind, op, v1, v2, style) == 0
+        changed()
+        return ok
+    }
+    @discardableResult func clearConditionalFormats(sheet: Int, _ r: GridRange?) -> Int {
+        let n = r.map { foglio_clear_cf(ptr, UInt32(sheet), $0.e0r, $0.e0c, $0.e1r, $0.e1c) } ?? foglio_clear_cf(ptr, UInt32(sheet), 0, 0, 0, 0)
+        changed()
+        return Int(n)
+    }
+
     // MARK: clipboard
     func copy(sheet: Int, _ r: GridRange) -> (text: String, token: UInt64)? {
         var token: UInt64 = 0

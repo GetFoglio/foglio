@@ -67,3 +67,9 @@ typedef struct { uint8_t kind; uint32_t replace_from; uint32_t arg_index; char *
 int32_t foglio_completion(FoglioBook *b, uint32_t sheet, int32_t row, int32_t col, const char *formula, uint32_t cursor, FoglioCompletion *out);
 char *foglio_cycle_reference(const FoglioBook *b, const char *text, uint32_t start, uint32_t end, int32_t *out2);
 char *foglio_unique_values(const FoglioBook *b, uint32_t sheet, int32_t col, int32_t r0, int32_t r1);
+
+// Conditional formatting (see src/ui.rs for kind/op/style codes). v1/v2 are typed values (may be NULL).
+int32_t foglio_add_cf(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1,
+                      uint32_t kind, uint32_t op, const char *v1, const char *v2, uint32_t style);
+// Removes rules intersecting the area; r0 <= 0 clears the whole sheet. Returns the number removed.
+int32_t foglio_clear_cf(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);

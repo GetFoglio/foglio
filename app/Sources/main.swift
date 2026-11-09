@@ -302,6 +302,12 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "cf": // cf kind op value
+                let p = arg.split(separator: " ").map(String.init)
+                if p.count >= 2, let k = UInt32(p[0]), let o = UInt32(p[1]) {
+                    _ = c.grid.book.addConditionalFormat(sheet: c.grid.sheet, c.grid.selection, kind: k, op: o, v1: p.count > 2 ? p[2] : "", style: 0)
+                    c.grid.contentChanged()
+                }
             case "barclick": c.focusFormulaBarForTesting()
             case "sheets": print("SHEETS \(c.grid.book.sheetNames.joined(separator: ",")) current=\(c.grid.sheet)")
             case "tab": if let i = Int(arg) { c.selectSheetForTesting(i) }
