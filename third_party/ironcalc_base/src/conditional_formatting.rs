@@ -137,6 +137,15 @@ impl<'a> Model<'a> {
     /// processed last). The result for each cell is stored in
     /// `cf_cache` and consumed by `get_extended_style_for_cell`.
     pub fn evaluate_conditional_formatting(&mut self) {
+        // Foglio fork: right after loading, this is what evaluates the
+        // formulas the rules read; the lookup cache spares the lookups among
+        // them reading their table again and again.
+        self.with_lookup_cache_outside_pass(|model| {
+            model.evaluate_conditional_formatting_rules()
+        });
+    }
+
+    fn evaluate_conditional_formatting_rules(&mut self) {
         self.cf_cache.clear();
         let sheet_count = self.workbook.worksheets.len();
         for sheet_idx in 0..sheet_count {

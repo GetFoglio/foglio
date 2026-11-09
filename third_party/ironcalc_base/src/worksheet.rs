@@ -679,6 +679,18 @@ impl Worksheet {
         Ok(constants::DEFAULT_ROW_HEIGHT)
     }
 
+    /// Foglio fork: `dimension().max_row`, from the last rows only.
+    pub fn used_max_row(&self) -> i32 {
+        self.sheet_data.last_row_with_cells().max(1)
+    }
+
+    /// Foglio fork: `dimension().max_column`, from the rows (not every cell).
+    pub fn used_max_column(&self) -> i32 {
+        self.sheet_data
+            .last_column_in_rows(1, crate::constants::LAST_ROW)
+            .max(1)
+    }
+
     /// Calculates dimension of the sheet. This function isn't cheap to calculate.
     pub fn dimension(&self) -> WorksheetDimension {
         // FIXME: It's probably better to just track the size as operations happen.

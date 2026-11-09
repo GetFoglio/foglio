@@ -7,9 +7,8 @@ use crate::{
     utils::ParsedReference,
 };
 
-use super::binary_search::binary_search_on_array;
-use super::lookup_cache::LookupMode;
-use super::util::{compare_values, from_wildcard_to_regex, result_matches_regex, values_are_equal};
+use super::lookup_cache::{LookupMode, LookupVector, VectorData};
+use super::util::compare_values;
 
 mod address_areas;
 mod choosecols_chooserows;
@@ -84,18 +83,49 @@ impl LookupTable {
         }
     }
 
-    /// Materializes the first row of the table (the search vector for HLOOKUP).
-    fn first_row(&self, model: &mut Model, cell: CellReferenceIndex) -> Vec<CalcResult> {
-        (0..self.columns())
-            .map(|column| self.get(model, 0, column, cell))
-            .collect()
+    /// The first row of the table (the search vector for HLOOKUP).
+    /// Foglio fork: a range is read through `Model::lookup_vector` (only its
+    /// used part; cached per evaluation pass).
+    fn first_row(&self, model: &mut Model, cell: CellReferenceIndex) -> LookupVector {
+        match self {
+            LookupTable::Range { left, right } => model.lookup_vector(
+                *left,
+                CellReferenceIndex {
+                    sheet: left.sheet,
+                    row: left.row,
+                    column: right.column,
+                },
+                false,
+                true,
+            ),
+            LookupTable::Array(_) => VectorData::from_values(
+                (0..self.columns())
+                    .map(|column| self.get(model, 0, column, cell))
+                    .collect(),
+            ),
+        }
     }
 
-    /// Materializes the first column of the table (the search vector for VLOOKUP).
-    fn first_column(&self, model: &mut Model, cell: CellReferenceIndex) -> Vec<CalcResult> {
-        (0..self.rows())
-            .map(|row| self.get(model, row, 0, cell))
-            .collect()
+    /// The first column of the table (the search vector for VLOOKUP).
+    /// Foglio fork: as `first_row`.
+    fn first_column(&self, model: &mut Model, cell: CellReferenceIndex) -> LookupVector {
+        match self {
+            LookupTable::Range { left, right } => model.lookup_vector(
+                *left,
+                CellReferenceIndex {
+                    sheet: left.sheet,
+                    row: right.row,
+                    column: left.column,
+                },
+                true,
+                true,
+            ),
+            LookupTable::Array(_) => VectorData::from_values(
+                (0..self.rows())
+                    .map(|row| self.get(model, row, 0, cell))
+                    .collect(),
+            ),
+        }
     }
 }
 
@@ -104,29 +134,21 @@ impl LookupTable {
 /// returning the largest value smaller than or equal to the target; otherwise a
 /// linear search for an exact match (supporting wildcards for text) is used.
 /// Returns `None` when the value is not found.
+/// Foglio fork: over a `VectorData` (whose unvisited tail is empty cells),
+/// with the hash index for exact matches when the vector is cached; the same
+/// answers as upstream's search over the materialized vector.
 fn lookup_index(
     lookup_value: &CalcResult,
-    search_vector: &[CalcResult],
+    search_vector: &VectorData,
     is_sorted: bool,
 ) -> Option<usize> {
     if is_sorted {
-        match binary_search_on_array(lookup_value, search_vector) {
+        match search_vector.binary_search(lookup_value) {
             -2 => None,
             l => Some(l as usize),
         }
     } else {
-        let result_matches: Box<dyn Fn(&CalcResult) -> bool> =
-            if let CalcResult::String(s) = lookup_value {
-                if let Ok(reg) = from_wildcard_to_regex(&s.to_lowercase(), true) {
-                    Box::new(move |x| result_matches_regex(x, &reg))
-                } else {
-                    Box::new(move |_| false)
-                }
-            } else {
-                let lookup_value = lookup_value.clone();
-                Box::new(move |x| compare_values(x, &lookup_value) == 0)
-            };
-        search_vector.iter().position(result_matches)
+        search_vector.exact_position(lookup_value, LookupMode::Vlookup)
     }
 }
 
@@ -202,11 +224,14 @@ impl<'a> Model<'a> {
     /// and in-formula array literals. Used by the vector-based lookup functions
     /// (MATCH, LOOKUP). Returns the appropriate error `CalcResult` when the value
     /// is not a vector or not a valid source.
+    ///
+    /// Foglio fork: a range is read through `lookup_vector` (only its used
+    /// part; cached per evaluation pass).
     fn as_vector(
         &mut self,
         value: CalcResult,
         cell: CellReferenceIndex,
-    ) -> Result<Vec<CalcResult>, CalcResult> {
+    ) -> Result<LookupVector, CalcResult> {
         match value {
             CalcResult::Range { left, right } => {
                 let is_row_vector = if left.row == right.row {
@@ -220,7 +245,7 @@ impl<'a> Model<'a> {
                         message: "Argument must be a vector".to_string(),
                     });
                 };
-                Ok(self.prepare_array(&left, &right, is_row_vector))
+                Ok(self.lookup_vector(left, right, is_row_vector, true))
             }
             CalcResult::Array(array) => {
                 // An array is a vector if it is a single row or a single column.
@@ -232,11 +257,13 @@ impl<'a> Model<'a> {
                         message: "Argument must be a vector".to_string(),
                     });
                 }
-                Ok(array
-                    .iter()
-                    .flatten()
-                    .map(|node| array_node_to_calc_result(node, cell))
-                    .collect())
+                Ok(VectorData::from_values(
+                    array
+                        .iter()
+                        .flatten()
+                        .map(|node| array_node_to_calc_result(node, cell))
+                        .collect(),
+                ))
             }
             error @ CalcResult::Error { .. } => Err(error),
             _ => Err(CalcResult::Error {
@@ -410,27 +437,12 @@ impl<'a> Model<'a> {
             1
         };
         let match_range = self.evaluate_node_in_context(&args[1], cell);
-        // Foglio fork: exact matches in a range go through the per-pass index.
-        if match_type == 0 {
-            if let CalcResult::Range { left, right } = &match_range {
-                if let Some(found) =
-                    self.cached_exact_lookup(&target, *left, *right, LookupMode::Match)
-                {
-                    return match found {
-                        Some(l) => CalcResult::Number(l as f64 + 1.0),
-                        None => CalcResult::Error {
-                            error: Error::NA,
-                            origin: cell,
-                            message: "Not found".to_string(),
-                        },
-                    };
-                }
-            }
-        }
 
         // MATCH operates on a vector (a single row or single column). We
         // materialize the second argument, be it a range reference or an array
         // literal, into a flat list of values and then run the search on it.
+        // Foglio fork: a range is read only up to its used part and cached per
+        // pass (`lookup_vector`); exact matches use its hash index.
         let values = match self.as_vector(match_range, cell) {
             Ok(values) => values,
             Err(error) => return error,
@@ -443,7 +455,7 @@ impl<'a> Model<'a> {
                 let mut r = values.len();
                 while l < r {
                     let m = (l + r) / 2;
-                    if compare_values(&values[m], &target) >= 0 {
+                    if compare_values(values.get(m), &target) >= 0 {
                         l = m + 1;
                     } else {
                         r = m;
@@ -463,30 +475,18 @@ impl<'a> Model<'a> {
             }
             0 => {
                 // We apply linear search
-                let result_matches: Box<dyn Fn(&CalcResult) -> bool> =
-                    if let CalcResult::String(s) = &target {
-                        if let Ok(reg) = from_wildcard_to_regex(&s.to_lowercase(), true) {
-                            Box::new(move |x| result_matches_regex(x, &reg))
-                        } else {
-                            Box::new(move |_| false)
-                        }
-                    } else {
-                        Box::new(move |x| values_are_equal(x, &target))
-                    };
-                for (l, value) in values.iter().enumerate() {
-                    if result_matches(value) {
-                        return CalcResult::Number(l as f64 + 1.0);
-                    }
-                }
-                CalcResult::Error {
-                    error: Error::NA,
-                    origin: cell,
-                    message: "Not found".to_string(),
+                match values.exact_position(&target, LookupMode::Match) {
+                    Some(l) => CalcResult::Number(l as f64 + 1.0),
+                    None => CalcResult::Error {
+                        error: Error::NA,
+                        origin: cell,
+                        message: "Not found".to_string(),
+                    },
                 }
             }
             _ => {
                 // l is the number of elements less than target in the vector
-                let l = binary_search_on_array(&target, &values);
+                let l = values.binary_search(&target);
                 if l == -2 {
                     return CalcResult::Error {
                         error: Error::NA,
@@ -553,27 +553,8 @@ impl<'a> Model<'a> {
             };
         }
         // We look for `lookup_value` in the first row of the table
-        // Foglio fork: exact matches in a range go through the per-pass index.
-        let cached = match &table {
-            LookupTable::Range { left, right } if !is_sorted => self.cached_exact_lookup(
-                &lookup_value,
-                *left,
-                CellReferenceIndex {
-                    sheet: left.sheet,
-                    row: left.row,
-                    column: right.column,
-                },
-                LookupMode::Vlookup,
-            ),
-            _ => None,
-        };
-        let found = match cached {
-            Some(found) => found,
-            None => {
-                let search_vector = table.first_row(self, cell);
-                lookup_index(&lookup_value, &search_vector, is_sorted)
-            }
-        };
+        let search_vector = table.first_row(self, cell);
+        let found = lookup_index(&lookup_value, &search_vector, is_sorted);
         match found {
             Some(column) => table.get(self, row_index - 1, column as i32, cell),
             None => CalcResult::Error {
@@ -637,27 +618,8 @@ impl<'a> Model<'a> {
             };
         }
         // We look for `lookup_value` in the first column of the table
-        // Foglio fork: exact matches in a range go through the per-pass index.
-        let cached = match &table {
-            LookupTable::Range { left, right } if !is_sorted => self.cached_exact_lookup(
-                &lookup_value,
-                *left,
-                CellReferenceIndex {
-                    sheet: left.sheet,
-                    row: right.row,
-                    column: left.column,
-                },
-                LookupMode::Vlookup,
-            ),
-            _ => None,
-        };
-        let found = match cached {
-            Some(found) => found,
-            None => {
-                let search_vector = table.first_column(self, cell);
-                lookup_index(&lookup_value, &search_vector, is_sorted)
-            }
-        };
+        let search_vector = table.first_column(self, cell);
+        let found = lookup_index(&lookup_value, &search_vector, is_sorted);
         match found {
             Some(row) => table.get(self, row as i32, column_index - 1, cell),
             None => CalcResult::Error {
@@ -714,7 +676,10 @@ impl<'a> Model<'a> {
                 Ok(values) => values,
                 Err(error) => return error,
             };
-            return result_vector.into_iter().nth(l).unwrap_or(not_found);
+            if l < result_vector.len() {
+                return result_vector.get(l).clone();
+            }
+            return not_found;
         }
 
         // Array form (also covers a plain vector, where the first and last

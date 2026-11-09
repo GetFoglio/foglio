@@ -187,6 +187,24 @@ impl Row {
         }
     }
 
+    /// Foglio fork: the column of the last cell of the row, if it has any.
+    pub(super) fn last_column(&self) -> Option<i32> {
+        match self {
+            Row::Cells(cells) => cells.last().map(|(column, _)| *column),
+            Row::Numbers {
+                first_column,
+                values,
+                ..
+            } => {
+                if values.is_empty() {
+                    None
+                } else {
+                    Some(*first_column + values.len() as i32 - 1)
+                }
+            }
+        }
+    }
+
     /// Where the column is among the numbers of a row of numbers.
     #[inline]
     pub(super) fn offset(first_column: i32, values: &[f64], column: i32) -> Option<usize> {

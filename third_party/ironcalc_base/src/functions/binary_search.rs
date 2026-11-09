@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 
-use crate::{calc_result::CalcResult, expressions::types::CellReferenceIndex, model::Model};
+#[cfg(test)]
+use crate::calc_result::CalcResult;
 
+#[cfg(test)]
 use super::util::compare_values;
 
 // NOTE: We don't know how Excel exactly implements binary search internally.
@@ -137,44 +139,16 @@ pub(crate) fn binary_search_descending_or_greater<T: Ord>(target: &T, array: &[T
     Some((n - r - 1) as i32)
 }
 
-impl<'a> Model<'a> {
-    /// Returns an array with the list of cell values in the range
-    pub(crate) fn prepare_array(
-        &mut self,
-        left: &CellReferenceIndex,
-        right: &CellReferenceIndex,
-        is_row_vector: bool,
-    ) -> Vec<CalcResult> {
-        let n = if is_row_vector {
-            right.row - left.row
-        } else {
-            right.column - left.column
-        } + 1;
-        let mut result = vec![];
-        for index in 0..n {
-            let row;
-            let column;
-            if is_row_vector {
-                row = left.row + index;
-                column = left.column;
-            } else {
-                column = left.column + index;
-                row = left.row;
-            }
-            let value = self.evaluate_cell(CellReferenceIndex {
-                sheet: left.sheet,
-                row,
-                column,
-            });
-            result.push(value);
-        }
-        result
-    }
-}
+// Foglio fork: `Model::prepare_array`, which read a vector cell by cell into
+// a new vector on every call, is replaced by `Model::lookup_vector`
+// (`lookup_cache.rs`): only the used part of the sheet, cached per pass.
 
 /// Old style binary search over an already materialized vector of values.
 /// Returns the index of the matching element or the largest element smaller
 /// than `target`. Returns `-2` if `target` is smaller than every element.
+/// Foglio fork: the lookups use `VectorData::binary_search`; this is the
+/// reference its tests compare against.
+#[cfg(test)]
 pub(crate) fn binary_search_on_array(target: &CalcResult, array: &[CalcResult]) -> i32 {
     // We apply binary search leftmost for value in the array
     let mut l = 0;

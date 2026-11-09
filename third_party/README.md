@@ -47,7 +47,48 @@ resolving to these copies. Every Foglio change is marked with a
   not while a cell of the vector is being evaluated (cycle detection); and a
   spill into an indexed vector abandons the pass, which runs again without the
   index (`Restart::LookupCacheConflict`). 1000 exact VLOOKUPs into 10k rows:
-  1.7 s → 1.4 ms.
+  1.7 s → 1.4 ms. (Now built from the vectors kept per pass, see the next
+  item.)
+* **Lookups read only the used part of their vectors, once per pass**
+  (`functions/lookup_cache.rs`: `Model::lookup_vector`, `VectorData`; used by
+  VLOOKUP/HLOOKUP, MATCH, LOOKUP, XLOOKUP, XMATCH; `prepare_array` removed):
+  - A lookup vector (the first column of a VLOOKUP table, MATCH's range, …) is
+    read in order, cell by cell, as before, but only up to the last row (for a
+    column) or column (for a row) of the sheet that holds a cell; this is
+    checked again after the walk in case a formula evaluated during it
+    spilled further. Positions past it are empty: put on record as read empty
+    in one go (`record_seen_empty_range`, so a later spill into them still
+    restarts the pass) and treated as empty cells by the searches, which give
+    the same answers as on the whole vector (`VLOOKUP(0,A:B,2,FALSE)` still
+    finds the first empty cell below the data; IronCalc's approximate search
+    over a whole column still lands on the last row, as before). Any range is
+    clipped this way, not only `A:A` and `1:1`.
+  - The values read are kept for the rest of the evaluation pass (replacing
+    the per-pass hash index, which is now built on demand from them): later
+    lookups into the same vector read no cell and allocate nothing — a hash
+    probe for exact matches (same rules as before), `VectorData::binary_search`
+    (upstream's `binary_search_on_array`, same probes) for approximate ones, a
+    scan otherwise. XLOOKUP/XMATCH keep upstream's whole-column clipping
+    (`clip_to_used_area`) and use the kept values for every mode. LOOKUP's
+    result vector goes through the same path. Same invariants as before:
+    not while a cell of the vector is on the evaluation stack, nothing kept
+    from an interrupted read, a spill into a kept vector reruns the pass
+    without them.
+  - Outside a pass the cache is used only while the conditional formatting is
+    evaluated (`with_lookup_cache_outside_pass`), which at load time
+    (`Model::from_workbook`) is what evaluates the formulas the rules read; a
+    spill into a kept vector drops it, and a vector during whose reading a
+    spill happened is not kept.
+  - `clip_to_used_area` and SUMIFS & co. (`apply_ifs`) take the used area from
+    `Worksheet::used_max_row`/`used_max_column` (new
+    `SheetData::last_row_with_cells`/`last_column_in_rows`): the same bounds
+    as `dimension()`, which visited every cell of the sheet on every call.
+  - Apache POI's `StructuredRefs-lots-with-lookups.xlsx` (7 274 formulas,
+    3 264 `VLOOKUP(…,Query!$A:$N,…,FALSE)`, structured references, a
+    conditional format reading them): opening it took 12 s
+    (`Model::from_workbook`, the conditional formatting evaluating every
+    formula outside a pass, each VLOOKUP copying 1 048 576 cells), now
+    ≈ 25 ms; its full evaluation 54 → 3 ms.
 * **Incremental recalculation** (new `dependencies.rs`,
   `evaluation/incremental.rs`; hooks in `evaluation.rs`, `user_model/common.rs`):
   - `DependencyIndex`: reverse dependencies of every formula, built from the
@@ -199,6 +240,15 @@ resolving to these copies. Every Foglio change is marked with a
   FILTER/SORT/UNIQUE/SEQUENCE spills, INDIRECT/OFFSET, LET, errors and
   cycles, with undo/redo, clears, row insert/delete and paused batches — all
   in check mode.
+* `ironcalc_base/src/test/test_lookup_ranges.rs`: lookups against a naive
+  evaluation (`NAIVE_LOOKUPS`: every lookup reads its whole vector on every
+  call, no cache, no index, as upstream) on randomized workbooks — whole
+  columns and rows, tall and `A2:A1048576` ranges, structured references,
+  numbers/zeros/text with wildcards/booleans/errors/empty cells, formulas,
+  spills into the lookup column, cycles — at load (conditional formatting)
+  and after full evaluations, all cells identical; random edits in check
+  mode; the vector searches against upstream's on materialized vectors;
+  `used_max_row`/`used_max_column` against `dimension()`.
 * `ironcalc/tests/incremental_corpus.rs`: random edits on every workbook of
   upstream's Excel-made xlsx corpus (242 workbooks), in check mode.
 * `number_format::tests::excel_string`.

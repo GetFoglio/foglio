@@ -148,6 +148,58 @@ impl SheetData {
         })
     }
 
+    /// Foglio fork: the last row that has at least one cell (an empty cell
+    /// with a style counts, as in `Worksheet::dimension`), 0 if there is none.
+    /// Looks at the last chunks only, from the end.
+    pub fn last_row_with_cells(&self) -> i32 {
+        for (chunk_index, chunk) in self.chunks.iter().enumerate().rev() {
+            let Some(chunk) = chunk else {
+                continue;
+            };
+            for (index, row) in chunk.rows.iter().enumerate().rev() {
+                if matches!(row, Some(row) if !row.is_empty()) {
+                    return ((chunk_index << CHUNK_BITS) | index) as i32;
+                }
+            }
+        }
+        0
+    }
+
+    /// Foglio fork: the largest column that has a cell in the rows
+    /// `first_row..=last_row`, 0 if there is none. Visits the rows that
+    /// exist, not their cells.
+    pub fn last_column_in_rows(&self, first_row: i32, last_row: i32) -> i32 {
+        let first_row = first_row.max(1);
+        let last_row = last_row.min(LAST_ROW);
+        if first_row > last_row {
+            return 0;
+        }
+        let mut last = 0;
+        let first_chunk = first_row as usize >> CHUNK_BITS;
+        let last_chunk = last_row as usize >> CHUNK_BITS;
+        for chunk_index in first_chunk..=last_chunk {
+            let Some(Some(chunk)) = self.chunks.get(chunk_index) else {
+                continue;
+            };
+            let from = if chunk_index == first_chunk {
+                first_row as usize & CHUNK_MASK
+            } else {
+                0
+            };
+            let to = if chunk_index == last_chunk {
+                last_row as usize & CHUNK_MASK
+            } else {
+                CHUNK_MASK
+            };
+            for row in chunk.rows[from..=to].iter().flatten() {
+                if let Some(column) = row.last_column() {
+                    last = last.max(column);
+                }
+            }
+        }
+        last
+    }
+
     /// The rows that exist, in ascending order.
     pub fn rows(&self) -> Vec<i32> {
         self.rows_in_order().map(|(row, _)| row).collect()

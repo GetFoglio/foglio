@@ -268,26 +268,23 @@ impl<'a> Model<'a> {
                             column: column2,
                             row: row2,
                         };
+                        // Foglio fork: the lookup array is read once per pass
+                        // (`lookup_vector`; already clipped above).
+                        let vector = self.lookup_vector(left, right, is_row_vector, false);
+                        let array = &vector.values;
                         match search_mode {
                             SearchMode::StartAtFirstItem | SearchMode::StartAtLastItem => {
                                 // Foglio fork: exact matches go through the per-pass index.
                                 let cached = if search_mode == SearchMode::StartAtFirstItem
                                     && match_mode == MatchMode::ExactMatch
                                 {
-                                    self.cached_exact_lookup(
-                                        &lookup_value,
-                                        left,
-                                        right,
-                                        LookupMode::Xlookup,
-                                    )
+                                    vector.indexed_position(&lookup_value, LookupMode::Xlookup)
                                 } else {
                                     None
                                 };
                                 let found = match cached {
                                     Some(found) => found,
                                     None => {
-                                        let array =
-                                            &self.prepare_array(&left, &right, is_row_vector);
                                         linear_search(&lookup_value, array, search_mode, match_mode)
                                     }
                                 };
@@ -310,26 +307,14 @@ impl<'a> Model<'a> {
                             | SearchMode::BinarySearchDescending => {
                                 let index = if match_mode == MatchMode::ExactMatchLarger {
                                     if search_mode == SearchMode::BinarySearchAscending {
-                                        binary_search_or_greater(
-                                            &lookup_value,
-                                            &self.prepare_array(&left, &right, is_row_vector),
-                                        )
+                                        binary_search_or_greater(&lookup_value, array)
                                     } else {
-                                        binary_search_descending_or_greater(
-                                            &lookup_value,
-                                            &self.prepare_array(&left, &right, is_row_vector),
-                                        )
+                                        binary_search_descending_or_greater(&lookup_value, array)
                                     }
                                 } else if search_mode == SearchMode::BinarySearchAscending {
-                                    binary_search_or_smaller(
-                                        &lookup_value,
-                                        &self.prepare_array(&left, &right, is_row_vector),
-                                    )
+                                    binary_search_or_smaller(&lookup_value, array)
                                 } else {
-                                    binary_search_descending_or_smaller(
-                                        &lookup_value,
-                                        &self.prepare_array(&left, &right, is_row_vector),
-                                    )
+                                    binary_search_descending_or_smaller(&lookup_value, array)
                                 };
                                 match index {
                                     None => if_not_found,

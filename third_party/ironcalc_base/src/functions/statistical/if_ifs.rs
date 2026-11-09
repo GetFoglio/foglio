@@ -99,8 +99,24 @@ impl<'a> Model<'a> {
         let right_row = first_range.right.row;
         let right_column = first_range.right.column;
 
-        let dimension = match self.workbook.worksheet(first_range.left.sheet) {
-            Ok(s) => s.dimension(),
+        let open_row = left_row == 1 && right_row == LAST_ROW;
+        let open_column = left_column == 1 && right_column == LAST_COLUMN;
+
+        // Foglio fork: the bounds of `dimension()`, without visiting every
+        // cell, and only the ones used.
+        let (max_row, max_column) = match self.workbook.worksheet(first_range.left.sheet) {
+            Ok(s) => (
+                if open_row {
+                    s.used_max_row()
+                } else {
+                    right_row
+                },
+                if open_column {
+                    s.used_max_column()
+                } else {
+                    right_column
+                },
+            ),
             Err(_) => {
                 return CalcResult::new_error(
                     Error::ERROR,
@@ -109,11 +125,6 @@ impl<'a> Model<'a> {
                 )
             }
         };
-        let max_row = dimension.max_row;
-        let max_column = dimension.max_column;
-
-        let open_row = left_row == 1 && right_row == LAST_ROW;
-        let open_column = left_column == 1 && right_column == LAST_COLUMN;
 
         // The cells beyond the used area are taken as empty without being
         // read; every range depends on them, so they go on record first.

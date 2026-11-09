@@ -13,6 +13,7 @@ use crate::functions::{
         binary_search_descending_or_greater, binary_search_descending_or_smaller,
         binary_search_or_greater, binary_search_or_smaller,
     },
+    lookup_cache::VectorData,
     util::{compare_values, from_wildcard_to_regex, result_matches_regex},
 };
 
@@ -205,7 +206,8 @@ impl<'a> Model<'a> {
         // Materialise `lookup_array` into a one-dimensional vector of values.
         // It may be a range reference or an in-formula array constant `{…}`;
         // either way it must be a single row or single column.
-        let array: Vec<CalcResult> = match self.evaluate_node_in_context(&args[1], cell) {
+        // Foglio fork: a range is read once per pass (`lookup_vector`).
+        let vector = match self.evaluate_node_in_context(&args[1], cell) {
             CalcResult::Range { left, right } => {
                 let is_col_vec = left.column == right.column;
                 let is_row_vec = left.row == right.row;
@@ -232,7 +234,7 @@ impl<'a> Model<'a> {
                     row: row2,
                     column: col2,
                 };
-                self.prepare_array(&left, &right, is_col_vec)
+                self.lookup_vector(left, right, is_col_vec, false)
             }
             CalcResult::Array(rows) => {
                 // An array constant must be a single row or single column.
@@ -247,10 +249,12 @@ impl<'a> Model<'a> {
                         "lookup_array must be a single row or column".to_string(),
                     );
                 }
-                rows.iter()
-                    .flatten()
-                    .map(|node| super::array_node_to_calc_result(node, cell))
-                    .collect()
+                VectorData::from_values(
+                    rows.iter()
+                        .flatten()
+                        .map(|node| super::array_node_to_calc_result(node, cell))
+                        .collect(),
+                )
             }
             error @ CalcResult::Error { .. } => return error,
             _ => {
@@ -262,6 +266,7 @@ impl<'a> Model<'a> {
             }
         };
 
+        let array: &[CalcResult] = &vector.values;
         match search_mode {
             SearchMode::FirstToLast | SearchMode::LastToFirst => {
                 if match_mode == MatchMode::Regex {
@@ -275,7 +280,7 @@ impl<'a> Model<'a> {
                         }
                     }
                 }
-                match linear_search(&lookup_value, &array, &search_mode, match_mode) {
+                match linear_search(&lookup_value, array, &search_mode, match_mode) {
                     Some(idx) => CalcResult::Number(idx as f64 + 1.0),
                     None => CalcResult::new_error(Error::NA, cell, "Not found".to_string()),
                 }
@@ -290,14 +295,14 @@ impl<'a> Model<'a> {
                 }
                 let idx_opt = if match_mode == MatchMode::ExactMatchLarger {
                     if search_mode == SearchMode::BinaryAscending {
-                        binary_search_or_greater(&lookup_value, &array)
+                        binary_search_or_greater(&lookup_value, array)
                     } else {
-                        binary_search_descending_or_greater(&lookup_value, &array)
+                        binary_search_descending_or_greater(&lookup_value, array)
                     }
                 } else if search_mode == SearchMode::BinaryAscending {
-                    binary_search_or_smaller(&lookup_value, &array)
+                    binary_search_or_smaller(&lookup_value, array)
                 } else {
-                    binary_search_descending_or_smaller(&lookup_value, &array)
+                    binary_search_descending_or_smaller(&lookup_value, array)
                 };
 
                 match idx_opt {

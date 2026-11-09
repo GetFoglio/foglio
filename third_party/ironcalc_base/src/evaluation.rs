@@ -1263,14 +1263,19 @@ impl<'a> Model<'a> {
         if !whole_rows && !whole_columns {
             return Ok((row2, column2));
         }
-        let dimension = self
+        // Foglio fork: the same bounds as `Worksheet::dimension()`, without
+        // visiting every cell of the sheet on every call.
+        let worksheet = self
             .workbook
             .worksheet(sheet)
-            .map_err(|_| format!("Invalid worksheet index: '{sheet}'"))?
-            .dimension();
-        let last_row = if whole_rows { dimension.max_row } else { row2 };
+            .map_err(|_| format!("Invalid worksheet index: '{sheet}'"))?;
+        let last_row = if whole_rows {
+            worksheet.used_max_row()
+        } else {
+            row2
+        };
         let last_column = if whole_columns {
-            dimension.max_column
+            worksheet.used_max_column()
         } else {
             column2
         };
@@ -1295,6 +1300,9 @@ impl<'a> Model<'a> {
         clears: &[CellKey],
     ) -> bool {
         if !self.evaluation.in_pass {
+            // Foglio fork: the lookup cache in use outside a pass (see
+            // `functions/lookup_cache.rs`) forgets what this changes.
+            self.lookup_cache_before_spill_outside_pass(writes.iter().chain(clears.iter()));
             return false;
         }
         // Foglio fork: values the lookup index was built from are about to
