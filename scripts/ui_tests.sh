@@ -53,4 +53,10 @@ run "show formulas" "input A1=2;; input A2==A1*3;; showformulas;; state" "editin
 run "defined names" "input B2=1;; input B3=2;; input B4=3;; select B2:B4;; namebox Vendite;; input D1==SOMMA(Vendite);; print D1;; select F9;; namebox vendite;; state" "CELL D1 = 6 | =SOMMA(Vendite)" "sel=B2:B4"
 run "multi-key sort" "input A1=b;; input B1=1;; input A2=a;; input B2=2;; input A3=b;; input B3=3;; input A4=a;; input B4=1;; sortkeys A1:B4 A+ B-;; print B1;; print B3;; print B4" "CELL B1 = 2 | 2" "CELL B3 = 3 | 3" "CELL B4 = 1 | 1"
 run "find all" "input A1=uno;; input C5=Uno e due;; input D9=tre;; findall uno" "FOUND 2"
+# Charts
+CHART_DATA="input A1=Mese;; input B1=Vendite;; input C1=Costi;; input A2=Gen;; input B2=10;; input C2=7;; input A3=Feb;; input B3=14;; input C3=9"
+run "chart insert" "$CHART_DATA;; chart column A1:B3;; chart list" "CHARTS 1 selected=0" "CHART 0 kind=column title=Vendite legend=none range=A1:B3 from=E1"
+run "chart delete key + undo" "$CHART_DATA;; chart line A1:C3;; chart click 0;; key delete;; chart list;; key cmd+z;; chart list" "CHARTS 0" "CHARTS 1"
+run "chart move + properties" "$CHART_DATA;; chart column A1:C3;; chart drag 0 200 0;; chart props 0 title=Totale_mese range=A1:B3;; chart list" "title=Totale mese" "range=A1:B3" "from=G1"
+run "chart save + reopen" "$CHART_DATA;; chart pie A1:B3;; chart line A1:C3;; chart roundtrip /tmp/foglio-ui-chart.xlsx" "REOPENED CHARTS 2 kinds=pie,line titles=Vendite,"
 exit $fail

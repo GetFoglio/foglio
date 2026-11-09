@@ -16,7 +16,7 @@ written in Swift/AppKit on top of a Rust calculation core. The aim is simple: op
 everyday spreadsheets quickly, feel at home on macOS, and stay small.
 
 > **Status: 1.0 preview.** Foglio handles everyday spreadsheets end to end. Keep backups of
-> important files: charts, pivot tables, macros and comments are not supported yet (see below).
+> important files: pivot tables, macros and comments are not supported yet (see below).
 
 ## Features
 
@@ -50,6 +50,8 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
   row heights, frozen panes, multiple sheets).
 - Opens `.xlsm` (macros are not run), `.xls`, `.xlsb`, `.ods` (values, formulas and dates), and
   `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and decimal-separator detection.
+- Charts (column, bar, line, pie, doughnut, area, scatter; stacked variants): Insert ▸ Chart
+  from the selection, move/resize on the sheet, properties sheet; read from and saved to `.xlsx`.
 - Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
 
 **Formulas** — ~500 Excel functions via a patched fork of the [IronCalc](https://github.com/ironcalc/IronCalc) engine
@@ -69,7 +71,7 @@ families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit
 | Open a 100k-row xlsx (300k formulas) | 0.9 s, ~113 MB | | |
 | One edit, 1,000 VLOOKUPs over 20k rows | ~3 ms (incremental recalculation) | | |
 
-**Not yet supported**: charts, pivot tables, comments/notes, data validation, images, macros,
+**Not yet supported**: pivot tables, comments/notes, data validation, images, macros,
 password-protected files, data bars/icon sets.
 
 ## Testing
