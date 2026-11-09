@@ -168,14 +168,14 @@ unsafe fn bytes_arg<'a>(data: *const u8, len: usize) -> Option<&'a [u8]> {
     (!data.is_null() && len > 0).then(|| std::slice::from_raw_parts(data, len))
 }
 
-/// Adds a picture showing the image in `data` (PNG, JPEG, GIF, BMP or TIFF)
+/// Adds a picture showing the image in `data` (PNG, JPEG, GIF, BMP, TIFF, EMF or WMF)
 /// placed as described by `json` (see foglio_pictures.h). Returns the index or -1.
 #[no_mangle]
 pub unsafe extern "C" fn foglio_picture_add(b: *mut FoglioBook, sheet: u32, data: *const u8, len: usize, json: *const c_char) -> i32 {
     let (Some(b), Some(bytes)) = (book(b), bytes_arg(data, len)) else { return -1 };
     let patch = cstr(json).unwrap_or("{}");
     guard(-1, || {
-        if !matches!(image_format(bytes), "png" | "jpeg" | "gif" | "bmp" | "tiff") {
+        if !matches!(image_format(bytes), "png" | "jpeg" | "gif" | "bmp" | "tiff" | "emf" | "wmf") {
             return -1;
         }
         let Ok(Value::Object(patch)) = serde_json::from_str::<Value>(patch) else { return -1 };
@@ -214,7 +214,7 @@ pub unsafe extern "C" fn foglio_picture_update(
         let Ok(Value::Object(patch)) = serde_json::from_str::<Value>(patch) else { return -1 };
         let Some(mut p) = b.model.get_pictures(sheet).ok().and_then(|l| l.get(index as usize)).cloned() else { return -1 };
         if let Some(bytes) = bytes {
-            if !matches!(image_format(bytes), "png" | "jpeg" | "gif" | "bmp" | "tiff") {
+            if !matches!(image_format(bytes), "png" | "jpeg" | "gif" | "bmp" | "tiff" | "emf" | "wmf") {
                 return -1;
             }
             let Ok(key) = b.model.add_picture_image(sheet, bytes) else { return -1 };

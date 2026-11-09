@@ -70,6 +70,8 @@ run "picture save + reopen" "$PIC_MAKE;; $CHART_DATA;; chart column A1:B3;; pic 
 run "paste image from another app" "$PIC_MAKE;; pic pbimage /tmp/foglio-ui-logo.png;; click D4;; key cmd+v;; pic list" "PICTURES 1 selected=0" "from=D4"
 run "picture copy, paste, delete + undo" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png B2;; pic click 0;; key cmd+c;; click H3;; key cmd+v;; pic list;; key delete;; pic list;; key cmd+z;; pic list" "PICTURES 2 selected=1" "PICTURE 1 from=H3" "PICTURES 1 selected=none" "PICTURES 2"
 run "picture stacking with charts" "$PIC_MAKE;; $CHART_DATA;; pic insert /tmp/foglio-ui-logo.png E2;; chart column A1:B3;; pic list;; pic front 0;; pic list" "ORDER p0,c0" "ORDER c0,p0"
+python3 -I "$ROOT/scripts/make_test_metafile.py" /tmp/foglio-ui-test.emf /tmp/foglio-ui-test.wmf
+run "EMF/WMF pictures: insert, draw, save + reopen" "pic insert /tmp/foglio-ui-test.emf B2;; pic insert /tmp/foglio-ui-test.wmf J2;; pic list;; pic render /tmp/foglio-ui-test.emf /tmp/foglio-ui-test-emf.png;; pic roundtrip /tmp/foglio-ui-metafiles.xlsx" "PICTURES 2" "format=emf" "format=wmf" "METAFILE 299x224" "ok=true" "REOPENED PICTURES 2 charts=0 incell=0 cropped=0 formats=emf,wmf"
 run "comments" "comment B2 Nota di prova;; key cmd+shift+n;; tab 0;; state" "editing=false"
 run "validation list" "validlist A1:A5 Sì;No;Forse;; select A2;; listitems;; checkvalid A3 Boh;; checkvalid A3 no" "VALID ok" "ITEMS Sì,No,Forse" "CHECK 1" "CHECK 0"
 run "summarize" "input A1=Cliente;; input B1=Importo;; input A2=Rossi;; input B2=10;; input A3=Bianchi;; input B3=5;; input A4=Rossi;; input B4=7;; select A1;; summarize A1:B4 A B 0;; sheets;; print B3" "current=1" "CELL B3 = 17"

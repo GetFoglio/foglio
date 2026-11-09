@@ -75,7 +75,10 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
   `<xdr:pic>` with cropping (`a:srcRect`), alt text and `editAs` (move and size with cells / move only /
   don't move); charts and pictures share the sheet's drawing part and keep their stacking order.
   Pictures written by Excel, LibreOffice, openpyxl, Apache POI (two-cell, one-cell and absolute anchors)
-  are read; EMF/WMF pictures are kept and saved back but shown as a placeholder. *Place in Cell* is saved
+  are read. EMF/WMF pictures (old Office clip art, MathType equations, pasted Visio/Stata/chart
+  pictures) are drawn by a built-in metafile player (`app/Sources/Metafile.swift`: shapes, paths, pens,
+  brushes, text in any Windows charset incl. Symbol and CJK, embedded bitmaps; EMF+-only records are
+  skipped), can be inserted from files and are saved back unchanged. *Place in Cell* is saved
   as a picture that moves and sizes with its cell (not Excel 365's rich-value "picture in cell" format,
   so it opens in every Excel as a normal picture over that cell); Excel 365 pictures in cells
   (`xl/richData`) are read as pictures placed in their cells.
@@ -105,7 +108,7 @@ bars/icon sets, sparklines, threaded comments (shown as plain notes).
 ## Testing
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 68 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 69 UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```

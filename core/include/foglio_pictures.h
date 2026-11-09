@@ -43,7 +43,7 @@ void foglio_bytes_free(uint8_t *p, size_t len);
 // in_cell true = Place in Cell (fitted, centred, moves and sizes with the cell);
 // false on an in-cell picture = Place over Cells (a one_cell picture where it was).
 
-// Adds a picture showing `data` (PNG, JPEG, GIF, BMP or TIFF bytes; the app converts
+// Adds a picture showing `data` (PNG, JPEG, GIF, BMP, TIFF, EMF or WMF bytes; the app converts
 // other formats). Default size: the image's pixel size; default place: A1.
 // Returns the new index or -1.
 int32_t foglio_picture_add(FoglioBook *b, uint32_t sheet, const uint8_t *data, size_t len, const char *json_patch);

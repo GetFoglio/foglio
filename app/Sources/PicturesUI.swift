@@ -10,6 +10,15 @@ enum PictureRenderer {
     private final class Source { let src: CGImageSource; let size: CGSize; init(_ s: CGImageSource, _ z: CGSize) { src = s; size = z } }
     private static let sources: NSCache<NSString, Source> = { let c = NSCache<NSString, Source>(); c.countLimit = 64; return c }()
     private static let thumbs: NSCache<NSString, CGImage> = { let c = NSCache<NSString, CGImage>(); c.totalCostLimit = 192 << 20; return c }()
+    private static let metafiles: NSCache<NSString, Metafile> = { let c = NSCache<NSString, Metafile>(); c.countLimit = 32; return c }()
+
+    /// EMF/WMF pictures, played by Metafile (ImageIO can't read them).
+    private static func metafile(_ key: String, book: Workbook, sheet: Int) -> Metafile? {
+        if let m = metafiles.object(forKey: key as NSString) { return m }
+        guard let data = book.pictureImageData(sheet: sheet, key: key), let m = Metafile(data) else { return nil }
+        metafiles.setObject(m, forKey: key as NSString)
+        return m
+    }
 
     /// ImageIO source and oriented pixel size of an image (nil for formats ImageIO can't read, e.g. EMF).
     private static func source(_ key: String, book: Workbook, sheet: Int) -> Source? {
@@ -30,12 +39,23 @@ enum PictureRenderer {
     /// Pixel size of the picture's image (oriented).
     static func pixelSize(_ p: PictureInfo, book: Workbook, sheet: Int) -> CGSize? {
         if let s = source(p.image, book: book, sheet: sheet) { return s.size }
+        if let m = metafile(p.image, book: book, sheet: sheet) { return m.size }
         return p.pixelW > 0 ? CGSize(width: p.pixelW, height: p.pixelH) : nil
     }
 
     /// The whole image, decoded with at least `minPixels` on its longer side (full size if smaller).
     static func image(_ key: String, book: Workbook, sheet: Int, minPixels: CGFloat) -> CGImage? {
-        guard let s = source(key, book: book, sheet: sheet) else { return nil }
+        guard let s = source(key, book: book, sheet: sheet) else {
+            // Vector metafile: rendered at the bucket size (sharp at any zoom, up to 4096 px).
+            guard let m = metafile(key, book: book, sheet: sheet) else { return nil }
+            var bucket: CGFloat = 256
+            while bucket < minPixels && bucket < 4096 { bucket *= 2 }
+            let cacheKey = "\(key)@\(Int(bucket))" as NSString
+            if let img = thumbs.object(forKey: cacheKey) { return img }
+            guard let img = m.image(maxPixels: Int(bucket)) else { return nil }
+            thumbs.setObject(img, forKey: cacheKey, cost: img.bytesPerRow * img.height)
+            return img
+        }
         let longest = max(s.size.width, s.size.height)
         var bucket: CGFloat = 256
         while bucket < minPixels && bucket < longest { bucket *= 2 }
@@ -90,6 +110,7 @@ enum PictureData {
     /// Bytes ready for the engine (PNG or JPEG kept as they are, other formats converted: JPEG for opaque photos,
     /// PNG otherwise; EXIF orientation applied) and the natural size in points (pixels at the image's dpi).
     static func prepare(_ data: Data) -> (Data, CGSize)? {
+        if let m = Metafile(data) { return (data, m.size) }   // EMF/WMF kept as vectors
         guard let src = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(src) > 0,
               let type = CGImageSourceGetType(src) as String? else { return nil }
         let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] ?? [:]
@@ -255,6 +276,8 @@ enum PicturesUI {
             if p.format == "jpeg" { pb.setData(data, forType: jpegType) }
             if let src = CGImageSourceCreateWithData(data as CFData, nil), let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
                let png = PictureData.encode(img, jpeg: false) { pb.setData(png, forType: .png) }
+            else if let m = Metafile(data), let img = m.image(maxPixels: Int(max(m.size.width, m.size.height) * 2)),
+                    let png = PictureData.encode(img, jpeg: false) { pb.setData(png, forType: .png) }
         }
     }
 
@@ -495,6 +518,13 @@ enum PicturesUI {
             let (before, after) = sheet.estimate()
             print("COMPRESS before=\(before) after=\(after) smaller=\(after < before)")
             sheet.apply()
+        case "render":   // render /in.emf|wmf /out.png: plays a metafile to a PNG (EMF/WMF check)
+            guard p.count >= 3, let d = try? Data(contentsOf: URL(fileURLWithPath: p[1])) else { return }
+            guard let m = Metafile(d) else { print("METAFILE none"); return }
+            let t = Date()
+            let img = m.image(maxPixels: 600)
+            if let img, let png = PictureData.encode(img, jpeg: false) { try? png.write(to: URL(fileURLWithPath: p[2])) }
+            print("METAFILE \(Int(m.size.width))x\(Int(m.size.height)) ms=\(Int(Date().timeIntervalSince(t) * 1000)) ok=\(img != nil)")
         case "pbimage":
             guard p.count >= 2, let d = try? Data(contentsOf: URL(fileURLWithPath: p[1])) else { return }
             let pb = NSPasteboard.general
@@ -667,7 +697,7 @@ extension SheetWindowController {
     @objc func insertPictureFromFile(_ sender: Any?) {
         guard let grid, let w = window, grid.commitIfEditing() else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = [.image] + ["emf", "wmf"].compactMap { UTType(filenameExtension: $0) }
         panel.allowsMultipleSelection = true
         panel.message = L("Choose the pictures to insert")
         panel.beginSheetModal(for: w) { r in
@@ -687,7 +717,7 @@ extension SheetWindowController {
 extension GridView {
     private func droppedURLs(_ info: NSDraggingInfo) -> [URL] {
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { (UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image)) ?? false }
+        return urls.filter { ["emf", "wmf"].contains($0.pathExtension.lowercased()) || (UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image)) ?? false }
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
