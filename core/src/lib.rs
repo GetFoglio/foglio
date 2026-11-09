@@ -382,10 +382,12 @@ pub extern "C" fn foglio_can_redo(b: *const FoglioBook) -> bool {
     book_ref(b).map(|b| b.model.can_redo()).unwrap_or(false)
 }
 
+/// Full recalculation of every formula (F9 / "Calculate Now"). Returns elapsed microseconds.
 #[no_mangle]
 pub extern "C" fn foglio_evaluate_us(b: *mut FoglioBook) -> u64 {
     let Some(b) = book(b) else { return 0 };
     let t = Instant::now();
-    b.model.evaluate();
+    guard((), || b.model.evaluate_full());
+    b.style_cache.clear();
     t.elapsed().as_micros() as u64
 }

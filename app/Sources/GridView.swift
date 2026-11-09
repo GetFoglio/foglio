@@ -668,6 +668,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         case 51, 117:
             clearSelection()
         case 120: beginEditing(.edit, initial: nil) // F2
+        case 101: recalculate(nil) // F9
         case 49 where shift && !cmd: // ⇧Space: whole rows
             select(range: GridRange(r0: selection.r0, c0: 0, r1: selection.r1, c1: Sheet.maxCols - 1), active: active)
         case 49 where flags.contains(.control): // ⌃Space: whole columns
@@ -1058,7 +1059,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
             fill(from: GridRange(target, target), into: selection)
         } else {
+            let t0 = CACurrentMediaTime()
             book.setInput(sheet: sheet, row: target.row, col: target.col, text)
+            Perf.shared.emit("EDIT_MS", String(format: "%.1f", (CACurrentMediaTime() - t0) * 1000))
         }
         if text.contains("\n") || book.style(sheet: sheet, row: target.row, col: target.col).wrap {
             if text.contains("\n") && !book.style(sheet: sheet, row: target.row, col: target.col).wrap {
@@ -1544,6 +1547,15 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     }
 
     // Zoom
+    /// F9: recalculate every formula (volatile functions such as NOW/RAND refresh too).
+    @objc func recalculate(_ sender: Any?) {
+        commitIfEditing()
+        let us = book.evaluateMicros()
+        Perf.shared.emit("RECALC_MS", String(format: "%.1f", Double(us) / 1000))
+        invalidateData()
+        notifySelection()
+    }
+
     @objc func zoomIn(_ sender: Any?) { zoom = (zoom * 1.25 * 20).rounded() / 20 }
     @objc func zoomOut(_ sender: Any?) { zoom = (zoom / 1.25 * 20).rounded() / 20 }
     @objc func actualSize(_ sender: Any?) { zoom = 1 }

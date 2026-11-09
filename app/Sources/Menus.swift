@@ -175,6 +175,8 @@ enum Menus {
             item("Sort Z to A", #selector(GridView.sortDescending(_:)), symbol: "arrow.down"),
             .separator(),
             item("Filter", #selector(GridView.toggleFilter(_:)), "f", [.command, .shift], symbol: "line.3.horizontal.decrease.circle"),
+            .separator(),
+            item("Calculate Now", #selector(GridView.recalculate(_:)), "=", [.command]),
         ]))
 
         let windowMenu = NSMenu(title: L("Window"))

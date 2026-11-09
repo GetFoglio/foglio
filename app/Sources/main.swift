@@ -179,7 +179,7 @@ enum UIScript {
     private static let keyCodes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "tab": (48, "\t"), "esc": (53, "\u{1b}"), "delete": (51, "\u{7f}"),
         "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "left": (123, "\u{F702}"), "right": (124, "\u{F703}"),
-        "f2": (120, "\u{F705}"), "pagedown": (121, "\u{F72D}"), "pageup": (116, "\u{F72C}"), "f4": (118, "\u{F707}"), "space": (49, " "), "home": (115, "\u{F729}"),
+        "f2": (120, "\u{F705}"), "f9": (101, "\u{F70C}"), "pagedown": (121, "\u{F72D}"), "pageup": (116, "\u{F72C}"), "f4": (118, "\u{F707}"), "space": (49, " "), "home": (115, "\u{F729}"),
     ]
 
     /// Sends a real key event through the window (same path as the keyboard).
@@ -302,6 +302,7 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "recalc": c.grid.recalculate(nil)
             case "painter": c.formatPainter(nil)
             case "styleof": if let ref = parseA1(arg) { let st = c.grid.book.style(sheet: c.grid.sheet, row: ref.row, col: ref.col); print("STYLE \(arg) bold=\(st.bold) bg=\(String(st.bg, radix: 16))") }
             case "cf": // cf kind op value

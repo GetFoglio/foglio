@@ -67,7 +67,8 @@ bool foglio_can_undo(const FoglioBook *b);
 bool foglio_can_redo(const FoglioBook *b);
 
 
-// Benchmark helper: full workbook evaluation, returns elapsed microseconds.
+// Full recalculation of every formula (F9). Edits are recalculated incrementally on their own.
+// Returns elapsed microseconds.
 uint64_t foglio_evaluate_us(FoglioBook *b);
 
 #include "foglio_ui.h"
