@@ -39,4 +39,6 @@ run "insert row shifts data" "input A2=x;; input B5==A2;; header 2;; key cmd+shi
 run "add sheet + undo" "key cmd+shift+n;; sheets;; key cmd+z;; sheets" "SHEETS Foglio1,Foglio2 current=1" "SHEETS Foglio1 current=0"
 run "cross-sheet reference" "input A1=5;; key cmd+shift+n;; input A1=1;; click B2;; type =;; tab 0;; click A1;; key return;; print B2" "CELL B2 = 5 | =Foglio1!A1"
 run "merged cell editing" "select B2:D3;; merge;; click C3;; type unito;; key return;; print B2;; state" "CELL B2 = unito | unito" "active=B4"
+run "sheet navigation" "key cmd+shift+n;; key cmd+shift+n;; tab 0;; key opt+right;; sheets;; key opt+left;; key opt+left;; sheets" "current=1" "current=2"
+run "format painter" "input A1=x;; select A1;; bold;; painter;; drag C3 D4;; styleof D4" "STYLE D4 bold=true"
 exit $fail

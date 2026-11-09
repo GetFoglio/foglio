@@ -6,6 +6,7 @@ protocol GridViewDelegate: AnyObject {
     func gridEditingTextChanged(_ grid: GridView, text: String)
     func gridContentChanged(_ grid: GridView)
     func gridModeChanged(_ grid: GridView)
+    func gridRequestsSheet(_ grid: GridView, offset: Int)
 }
 
 /// Text field used for in-cell editing.
@@ -642,6 +643,11 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let from = shift ? cursor : active
         func jump(_ dr: Int, _ dc: Int) {
             select(book.jump(sheet: sheet, from: from, dr: dr, dc: dc), extend: shift)
+        }
+        // Next/previous sheet: ⌃PageDown/⌃PageUp and ⌥→/⌥← (Excel for Mac).
+        if (flags.contains(.control) && (e.keyCode == 121 || e.keyCode == 116)) || (opt && !cmd && (e.keyCode == 124 || e.keyCode == 123)) {
+            delegate?.gridRequestsSheet(self, offset: (e.keyCode == 121 || e.keyCode == 124) ? 1 : -1)
+            return
         }
         switch e.keyCode {
         case 126: cmd ? jump(-1, 0) : move(-1, 0, extend: shift)

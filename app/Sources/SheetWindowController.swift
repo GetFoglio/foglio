@@ -484,6 +484,13 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         if formulaField.currentEditor() == nil { formulaField.stringValue = text }
     }
 
+    func gridRequestsSheet(_ g: GridView, offset: Int) {
+        let visible = (0..<g.book.sheetNames.count).filter { !g.book.isSheetHidden($0) }
+        guard let i = visible.firstIndex(of: g.sheet) else { return }
+        let next = visible[(i + offset + visible.count) % visible.count]
+        if next != g.sheet { switchTo(sheet: next) }
+    }
+
     func gridContentChanged(_ g: GridView) {
         // Undo/redo can add or remove sheets: keep tabs and the grid's sheet valid.
         let n = g.book.sheetNames.count

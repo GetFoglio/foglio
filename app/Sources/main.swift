@@ -179,7 +179,7 @@ enum UIScript {
     private static let keyCodes: [String: (UInt16, String)] = [
         "return": (36, "\r"), "tab": (48, "\t"), "esc": (53, "\u{1b}"), "delete": (51, "\u{7f}"),
         "up": (126, "\u{F700}"), "down": (125, "\u{F701}"), "left": (123, "\u{F702}"), "right": (124, "\u{F703}"),
-        "f2": (120, "\u{F705}"), "f4": (118, "\u{F707}"), "space": (49, " "), "home": (115, "\u{F729}"),
+        "f2": (120, "\u{F705}"), "pagedown": (121, "\u{F72D}"), "pageup": (116, "\u{F72C}"), "f4": (118, "\u{F707}"), "space": (49, " "), "home": (115, "\u{F729}"),
     ]
 
     /// Sends a real key event through the window (same path as the keyboard).
