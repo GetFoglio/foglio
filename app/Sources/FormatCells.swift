@@ -52,7 +52,9 @@ final class FormatCellsController: NSViewController {
         dateCodes.forEach { datePopup.addItem(withTitle: $0) }
         datePopup.target = self; datePopup.action = #selector(rebuildCode)
         codeField.target = self; codeField.action = #selector(codeTyped)
-        codeField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        codeField.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        list.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        datePopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
         preview.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         let decRow = NSStackView(views: [decimalsField, decimals])
         grid.addRow(with: [NSTextField(labelWithString: L("Category:")), list])
@@ -69,9 +71,14 @@ final class FormatCellsController: NSViewController {
         let buttons = NSStackView(views: [NSView(), cancel, ok])
         let root = NSStackView(views: [grid, buttons])
         root.orientation = .vertical
-        root.alignment = .trailing
+        root.alignment = .leading
         root.spacing = 16
-        root.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
+        root.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 16, right: 24)
+        buttons.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+        grid.column(at: 1).xPlacement = .leading
+        root.widthAnchor.constraint(greaterThanOrEqualToConstant: 460).isActive = true
+        root.frame = NSRect(x: 0, y: 0, width: 460, height: 300)
+        preferredContentSize = root.fittingSize
         view = root
         load(book.style(sheet: sheet, row: cell.row, col: cell.col).numFmt)
     }

@@ -163,7 +163,9 @@ enum Snapshot {
         ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1)   // CALayer render is y-up
         layer.render(in: ctx)
         // Child windows (autocomplete list, hints) on top, at their positions relative to the window.
-        for child in w.childWindows ?? [] where child.isVisible {
+        var overlays = (w.childWindows ?? []).filter(\.isVisible)
+        if let sheet = w.attachedSheet { overlays.append(sheet) }
+        for child in overlays {
             guard let cl = child.contentView?.superview?.layer ?? child.contentView?.layer else { continue }
             child.contentView?.superview?.wantsLayer = true
             let r = child.frame
@@ -333,6 +335,15 @@ enum UIScript {
             case "transpose": c.grid.pasteTransposed()
             case "removedups": c.grid.removeDuplicates(nil)
             case "insertrows": c.grid.insertRows(nil)
+            case "dialog": // open a dialog for visual checks
+                switch arg {
+                case "formatcells": c.formatCells(nil)
+                case "sort": c.grid.sortDialog(nil)
+                case "pastespecial": c.grid.pasteSpecial(nil)
+                case "names": c.nameManager(nil)
+                case "insertcells": c.grid.insertCellsDialog(nil)
+                default: break
+                }
             case "sortkeys": // sortkeys A2:B5 A+ B-
                 let p = arg.split(separator: " ").map(String.init)
                 if let r = FormulaText.gridRange(p[0].uppercased()) {
