@@ -124,6 +124,9 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
     private func button(_ symbol: String, _ tip: String, _ action: Selector, toggle: Bool = false) -> NSButton {
         let img = NSImage(systemSymbolName: symbol, accessibilityDescription: L(tip)) ?? NSImage()
         let b = NSButton(image: img, target: self, action: action)
+        b.title = ""
+        b.imagePosition = .imageOnly
+        b.setAccessibilityLabel(L(tip))
         b.bezelStyle = .accessoryBarAction
         b.showsBorderOnlyWhileMouseInside = !toggle
         if toggle { b.setButtonType(.pushOnPushOff) }
@@ -267,9 +270,11 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         nameBox.toolTip = L("Name Box: type a cell like B12 and press Return")
         nameBox.widthAnchor.constraint(equalToConstant: 96).isActive = true
         cancelButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("Cancel"))
+        cancelButton.title = ""; cancelButton.imagePosition = .imageOnly
         cancelButton.bezelStyle = .accessoryBarAction
         cancelButton.target = self; cancelButton.action = #selector(cancelEdit)
         enterButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: L("Enter"))
+        enterButton.title = ""; enterButton.imagePosition = .imageOnly
         enterButton.bezelStyle = .accessoryBarAction
         enterButton.target = self; enterButton.action = #selector(confirmEdit)
         let fx = NSButton(title: "fx", target: self, action: #selector(insertFunction(_:)))
@@ -310,6 +315,8 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
 
         let add = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L("New Sheet"))!,
                            target: self, action: #selector(addSheet(_:)))
+        add.title = ""
+        add.imagePosition = .imageOnly
         add.bezelStyle = .accessoryBarAction
         add.toolTip = L("New Sheet")
         modeLabel.font = .systemFont(ofSize: 11)
