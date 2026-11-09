@@ -96,7 +96,7 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        let mut index = DependencyIndex::default();
+        let mut index = DependencyIndex::with_capacity(cells.len());
         for (key, f) in cells {
             if let Some(template) = self.formula_template(key.0, f) {
                 index.add(key, template, true);

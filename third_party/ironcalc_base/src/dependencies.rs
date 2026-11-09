@@ -281,8 +281,10 @@ struct WideRect {
 #[derive(Default)]
 pub(crate) struct DependencyIndex {
     /// Every formula cell the index knows, with the template it was indexed
-    /// with (needed to remove it again).
-    forward: HashMap<CellKey, Arc<FormulaTemplate>, KeyBuild>,
+    /// with (needed to remove it again), as an index into `templates`.
+    forward: HashMap<CellKey, u32, KeyBuild>,
+    templates: Vec<Arc<FormulaTemplate>>,
+    template_ids: HashMap<usize, u32>,
     columns: HashMap<(u32, i32), Column, KeyBuild>,
     wide: Vec<WideRect>,
     /// Formula cells recalculated on every evaluation.
@@ -312,6 +314,16 @@ impl DependencyIndex {
         if template.volatile {
             self.volatile.insert(key);
         }
+        let address = Arc::as_ptr(&template) as usize;
+        let template_id = match self.template_ids.get(&address) {
+            Some(id) => *id,
+            None => {
+                let id = self.templates.len() as u32;
+                self.templates.push(template.clone());
+                self.template_ids.insert(address, id);
+                id
+            }
+        };
         let (_, row, column) = key;
         let columns = &mut self.columns;
         let wide = &mut self.wide;
@@ -353,21 +365,33 @@ impl DependencyIndex {
                 }
             }
         });
-        self.forward.insert(key, template);
+        self.forward.insert(key, template_id);
+    }
+
+    /// An empty index with room for `formulas` formula cells.
+    pub(crate) fn with_capacity(formulas: usize) -> Self {
+        DependencyIndex {
+            forward: HashMap::with_capacity_and_hasher(formulas, KeyBuild::default()),
+            ..Default::default()
+        }
     }
 
     /// Sorts what `add(.., bulk = true)` left unsorted.
     pub(crate) fn finish_bulk(&mut self) {
         for bucket in self.columns.values_mut() {
             bucket.points.sort_unstable_by_key(|(r, _)| *r);
+            bucket.points.shrink_to_fit();
+            bucket.rects.shrink_to_fit();
         }
+        self.wide.shrink_to_fit();
     }
 
     /// Removes a formula cell, if it is indexed.
     pub(crate) fn remove(&mut self, key: CellKey) {
-        let Some(template) = self.forward.remove(&key) else {
+        let Some(template_id) = self.forward.remove(&key) else {
             return;
         };
+        let template = self.templates[template_id as usize].clone();
         self.volatile.remove(&key);
         let (_, row, column) = key;
         let columns = &mut self.columns;
