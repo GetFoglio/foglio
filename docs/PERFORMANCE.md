@@ -12,6 +12,8 @@ cargo run --release --bin perf                 # all sizes, each in its own chil
 cargo run --release --bin perf -- 100000       # one size (add `novlookup` to drop column F)
 cargo run --release --bin perf -- lookups      # cost per lookup function
 IRONCALC_CHECK_INCREMENTAL=1 cargo run --release --bin perf -- 10000   # verify each edit
+cargo run --release --example xlsx_phases -- file.xlsx …  # opening an xlsx: read / from_workbook / evaluate
+cargo run --release --example xlsx_values -- out.txt file.xlsx …  # every formula value, to diff two builds
 ```
 
 ## Workbook
@@ -63,10 +65,31 @@ Unchanged: build via `Model::set_user_input` ≈ 6.7 µs/row, xlsx save
 | `VLOOKUP(k,A:B,2,FALSE)` | 1703 ms | **1.3 ms** |
 | `XLOOKUP(k,A,B)` (exact) | 1614 ms | **0.8 ms** |
 | `INDEX(B,MATCH(k,A,0))` | 92 ms | **0.9 ms** |
-| `VLOOKUP(k,A:B,2,TRUE)` (sorted) | 91 ms | 88 ms |
-| `XLOOKUP(…,,0,2)` (binary) | 84 ms | 81 ms |
+| `VLOOKUP(k,A:B,2,TRUE)` (sorted) | 91 ms | **0.7 ms** |
+| `XLOOKUP(…,,0,2)` (binary) | 84 ms | **0.8 ms** |
 | `SUMIF(A,k,B)` | 95 ms | 90 ms |
 | `SUM(A)` (baseline: reading 10k cells) | 68 ms | 66 ms |
+
+(The approximate rows: 116 → 0.7 ms and 121 → 0.8 ms in a same-session run
+of the previous fork build, see "Lookup vectors" below.)
+
+### Opening real workbooks with whole-column lookups
+
+Apache POI's `StructuredRefs-lots-with-lookups.xlsx` (7 274 formulas: 3 264
+`VLOOKUP(ROW($A8)-7,Query!$A:$N,4,FALSE)` inside `IF(ISNA(…))`, VLOOKUPs into
+structured references `Table_Query_from_RDS[#All]`, a 3 798-row
+`INDIRECT(…)+1` chain, a conditional format reading the results):
+
+| | before | after |
+|---|---|---|
+| `load_from_xlsx` (read + `Model::from_workbook`) | 11.05 s | **91 ms** |
+| of which `from_workbook` (conditional formatting evaluates the formulas it reads) | 12.0 s | **17 ms** |
+| `evaluate()` (full) | 54 ms | **2.4 ms** |
+
+POI's `VLookupFullColumn.xlsx`: evaluate 37 → 0.15 ms. Every formula value of
+the 593 xlsx/xlsm files of POI's test corpus and upstream's test corpus, after
+loading and after a full evaluation, is identical before and after
+(`xlsx_values`; only NOW/RANDARRAY cells differ between runs).
 
 ## What changed (in `third_party/ironcalc_base`)
 
@@ -87,7 +110,33 @@ Unchanged: build via `Model::set_user_input` ≈ 6.7 µs/row, xlsx save
    spill into an indexed vector reruns the pass without it. This replaced the
    "stop at the first match" idea: stopping early changes which cells a
    lookup reads, and with it cycle detection and spill-conflict detection.
-3. **Incremental recalculation** (`dependencies.rs`, `evaluation/incremental.rs`,
+3. **Lookup vectors: only the used part, once per pass**
+   (`functions/lookup_cache.rs`, `Model::lookup_vector`). The 12 s above had
+   two causes. Every VLOOKUP/HLOOKUP/MATCH/LOOKUP copied its whole search
+   vector into a new `Vec<CalcResult>` on every call — 1 048 576 cells for
+   `Query!$A:$N` — and searched it; and on opening a file the conditional
+   formatting (`Model::from_workbook`) evaluates the formulas it reads
+   *outside* an evaluation pass, where the per-pass index was off. Now:
+   * a vector is read in order, as before, but only up to the last row (or
+     column) of the sheet that has a cell, re-checked after the walk in case a
+     formula in it spilled further; the rest is recorded as read empty in one
+     go (spill detection unchanged) and searched as empty cells, so the
+     answers are those of the whole vector — including `VLOOKUP(0,A:B,2,FALSE)`
+     finding the first empty row, and IronCalc's own quirk that an approximate
+     search of a whole column lands on its last row;
+   * the values read are kept for the rest of the pass: the next lookups into
+     the vector read nothing and allocate nothing — a hash probe (exact), a
+     binary search over the kept values (approximate: O(log n) per call
+     instead of copying the column), or a scan;
+   * the cache also runs while the conditional formatting is evaluated
+     (nothing edits the workbook meanwhile; a spill into a kept vector drops
+     it);
+   * `clip_to_used_area` (SUM, COUNT, XLOOKUP, XMATCH, TEXTJOIN, …) and
+     SUMIFS & co. no longer call `Worksheet::dimension()` (a walk over every
+     cell of the sheet) on every call: same bounds from the last rows.
+   Cost: the kept vectors live until the end of the pass (≈ 40 B per cell
+   read: +11 MB RSS for the 300k-row VLOOKUP benchmark).
+4. **Incremental recalculation** (`dependencies.rs`, `evaluation/incremental.rs`,
    wired in `user_model/common.rs`), following the plan of the original audit:
    * a reverse-dependency index built from the parsed formulas with relative
      references resolved per cell — single cells per column sorted by row,
@@ -129,6 +178,15 @@ Unchanged: build via `Model::set_user_input` ≈ 6.7 µs/row, xlsx save
   --ignored many_random_sessions`: 2000 × 120 edits (≈ 132 000 incremental
   evaluations checked, 0 differences), also with `IRONCALC_MAX_DEPTH=1`
   (every recursion unwinds and replays).
+* `third_party/ironcalc_base/src/test/test_lookup_ranges.rs`: lookups against
+  a naive evaluation (every lookup reads its whole vector on every call, no
+  cache — what upstream did) on randomized workbooks: whole columns and rows,
+  tall and `A2:A1048576` ranges, structured references, numbers, zeros, text
+  with wildcards, booleans, errors, empty cells inside and below the data,
+  formulas, spills into the lookup column, cycles; compared after loading
+  (conditional formatting) and after full evaluations, cell by cell (60 cases
+  by default, 600 with `--ignored many_random_workbooks`); random edits in
+  check mode; the searches against upstream's on materialized vectors.
 * `third_party/ironcalc/tests/incremental_corpus.rs`: 40 random edits on each
   of the 242 workbooks of upstream's Excel-made xlsx corpus (≈ 7 500
   incremental evaluations checked, 0 differences).
@@ -168,7 +226,8 @@ takes 1 µs.
 ### 3. What does IronCalc already cache?
 Parsed ASTs (shared between cells with the same R1C1 formula), formula
 positions per sheet, the dynamic-array anchor order; now also the dependency
-index (across evaluations) and the lookup index (per evaluation pass).
+index (across evaluations) and the lookup vectors with their hash index (per
+evaluation pass).
 
 ## Notes for `core/` and the app
 
