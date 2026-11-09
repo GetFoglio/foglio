@@ -189,6 +189,8 @@ fn run_one(n: i32, with_vlookup: bool) {
     let load_eval_ms = ms(t.elapsed());
     let sum_a_loaded = loaded.get_cell_value_by_index(0, s, 1).unwrap();
     drop(loaded);
+    // PERF_KEEP_XLSX=/some/file.xlsx keeps the generated workbook (to time opening it in an app).
+    if let Ok(keep) = std::env::var("PERF_KEEP_XLSX") { let _ = std::fs::copy(&path, keep); }
     let _ = std::fs::remove_file(&path);
 
     let peak = peak_rss_mib();
