@@ -223,7 +223,11 @@ const CASES: &[Case] = &[
     ("MROUND", "=MROUND(5,-2)", E("#NUM!")),
     ("MROUND", "=MROUND(1.3,0.2)", N(1.4)),
     ("POWER", "=POWER(2,10)", N(1024.0)),
-    ("POWER", "=POWER(-8,1/3)", E("#NUM!")),
+    // Excel computes odd roots of negative numbers: IronCalc's own Excel-made
+    // test workbook (MATH_AND_TRIGONOMETRY/POWER.xlsx) caches -1.9999999999999998
+    // for POWER(-8,1/3). (An earlier version of this audit expected #NUM!.)
+    ("POWER", "=POWER(-8,1/3)", N(-2.0)),
+    ("POWER", "=POWER(-8,1/2)", E("#NUM!")),
     ("POWER", "=POWER(0,0)", E("#NUM!")),
     ("SQRT", "=SQRT(16)", N(4.0)),
     ("SQRT", "=SQRT(-1)", E("#NUM!")),

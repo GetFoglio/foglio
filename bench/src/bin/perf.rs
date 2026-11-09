@@ -1,6 +1,8 @@
 //! Performance benchmark of IronCalc for Foglio-sized workbooks.
 //!
 //! Run: `cargo run --release --bin perf`            (all sizes, each in a child process)
+//!      `IRONCALC_CHECK_INCREMENTAL=1 cargo run --release --bin perf -- 10000`
+//!                                                   (verify every incremental edit)
 //!      `cargo run --release --bin perf -- 100000`  (one size, in-process)
 //!      `cargo run --release --bin perf -- 100000 novlookup`
 //!
@@ -90,42 +92,39 @@ fn run_one(n: i32, with_vlookup: bool) {
     let eval_ms = ms(t.elapsed());
     let rss_after_eval = peak_rss_mib();
 
-    // sanity check the summary
     let s = n + 2;
-    let sum_a = model.get_cell_value_by_index(0, s, 1).unwrap();
 
-    // slow configurations get fewer repetitions so the whole run stays bounded
-    let reps = if with_vlookup && n > 10_000 { 1 } else { 5 };
+    // repetitions of each edit (median)
+    let reps = 5;
 
     // second (warm) evaluation
     let t = Instant::now();
     model.evaluate();
     let eval2_ms = ms(t.elapsed());
 
-    // save / load
-    let t = Instant::now();
-    save_to_xlsx(&model, &path).unwrap();
-    let save_ms = ms(t.elapsed());
-    let size_mb = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64 / 1e6;
-
-    // internal binary format, for comparison
-    let t = Instant::now();
-    let bytes = model.to_bytes();
-    let to_bytes_ms = ms(t.elapsed());
-    let icalc_mb = bytes.len() as f64 / 1e6;
-    drop(bytes);
-
-    // what the user feels after typing a value: UserModel::set_user_input
+    // what the user feels after typing a value: UserModel::set_user_input.
+    // The first evaluation of a UserModel is a full one (it does not know what
+    // happened to the model before); the second builds the dependency index
+    // (Foglio's IronCalc fork). Both are reported separately.
     let mut user = UserModel::from_model(model);
+    let check = std::env::var("IRONCALC_CHECK_INCREMENTAL").is_ok();
+    let t = Instant::now();
+    user.set_user_input(0, n / 3, 1, "999").unwrap();
+    let first_edit_ms = ms(t.elapsed());
+    let t = Instant::now();
+    user.set_user_input(0, n / 3 + 1, 1, "998").unwrap();
+    let index_edit_ms = ms(t.elapsed());
     let mut edit = Vec::new();
+    let mut ran = None;
     for i in 0..reps {
         let row = n / 2 + i;
         let t = Instant::now();
         user.set_user_input(0, row, 1, &format!("{}", 1000 + i)).unwrap();
         edit.push(ms(t.elapsed()));
+        ran = user.last_evaluation_incremental();
     }
     let edit_ms = median(&mut edit);
-    // edit of a cell nothing depends on (no DAG -> same cost)
+    // edit of a cell nothing depends on
     let mut edit_iso = Vec::new();
     for i in 0..reps {
         let t = Instant::now();
@@ -133,6 +132,19 @@ fn run_one(n: i32, with_vlookup: bool) {
         edit_iso.push(ms(t.elapsed()));
     }
     let edit_iso_ms = median(&mut edit_iso);
+    // a new formula (adds to the dependency index)
+    let mut edit_formula = Vec::new();
+    for i in 0..reps {
+        let row = n / 2 + i;
+        let t = Instant::now();
+        user.set_user_input(0, row, 4, &format!("=C{row}*1.25+{i}")).unwrap();
+        edit_formula.push(ms(t.elapsed()));
+    }
+    let edit_formula_ms = median(&mut edit_formula);
+    // undo of a value edit
+    let t = Instant::now();
+    user.undo().unwrap();
+    let undo_ms = ms(t.elapsed());
     // the same edit with evaluation paused = cost of the edit itself
     user.pause_evaluation();
     let mut edit_paused = Vec::new();
@@ -143,7 +155,31 @@ fn run_one(n: i32, with_vlookup: bool) {
     }
     let edit_paused_ms = median(&mut edit_paused);
     user.resume_evaluation();
+    // a full recalculation on demand
+    let t = Instant::now();
+    user.evaluate_full();
+    let full_ms = ms(t.elapsed());
+    let sum_after_edits = user.get_model().get_cell_value_by_index(0, s, 3).unwrap();
+    // includes the dependency index (peak so far; save and load come after)
+    let rss_after_edits = peak_rss_mib();
+    // what is saved (after the edits) must come back after load + evaluate
+    let sum_a = user.get_model().get_cell_value_by_index(0, s, 1).unwrap();
+
+    // save / load
+    let t = Instant::now();
+    save_to_xlsx(user.get_model(), &path).unwrap();
+    let save_ms = ms(t.elapsed());
+    let size_mb = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as f64 / 1e6;
+
+    // internal binary format, for comparison
+    let t = Instant::now();
+    let bytes = user.get_model().to_bytes();
+    let to_bytes_ms = ms(t.elapsed());
+    let icalc_mb = bytes.len() as f64 / 1e6;
+    drop(bytes);
+
     drop(user);
+    let _ = check;
 
     let t = Instant::now();
     let mut loaded = load_from_xlsx(&path, "en", "UTC", "en").unwrap();
@@ -158,9 +194,11 @@ fn run_one(n: i32, with_vlookup: bool) {
     let peak = peak_rss_mib();
     println!(
         "RESULT n={n} vlookup={with_vlookup} build_ms={build_ms:.1} eval_ms={eval_ms:.1} eval2_ms={eval2_ms:.1} \
-edit_ms={edit_ms:.1} edit_isolated_ms={edit_iso_ms:.1} edit_paused_ms={edit_paused_ms:.3} \
+first_edit_ms={first_edit_ms:.1} index_edit_ms={index_edit_ms:.1} edit_ms={edit_ms:.3} edit_ran={ran:?} \
+edit_isolated_ms={edit_iso_ms:.3} edit_formula_ms={edit_formula_ms:.3} undo_ms={undo_ms:.3} \
+edit_paused_ms={edit_paused_ms:.3} full_recalc_ms={full_ms:.1} sum_c_after_edits={sum_after_edits:?} \
 save_ms={save_ms:.1} xlsx_mb={size_mb:.2} load_ms={load_ms:.1} load_eval_ms={load_eval_ms:.1} \
-to_bytes_ms={to_bytes_ms:.1} icalc_mb={icalc_mb:.2} rss_after_eval_mib={rss_after_eval:.1} peak_rss_mib={peak:.1} \
+to_bytes_ms={to_bytes_ms:.1} icalc_mb={icalc_mb:.2} rss_after_eval_mib={rss_after_eval:.1} rss_after_edits_mib={rss_after_edits:.1} peak_rss_mib={peak:.1} \
 check_sum={sum_a:?}/{sum_a_loaded:?}"
     );
 }
