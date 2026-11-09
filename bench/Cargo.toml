@@ -22,3 +22,8 @@ path = "src/bin/perf.rs"
 opt-level = 3
 lto = "thin"
 codegen-units = 4
+
+# Patched fork of IronCalc 0.9.1 (see third_party/README.md).
+[patch.crates-io]
+ironcalc = { path = "../third_party/ironcalc" }
+ironcalc_base = { path = "../third_party/ironcalc_base" }

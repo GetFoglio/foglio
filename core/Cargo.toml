@@ -23,3 +23,8 @@ strip = true
 
 [dev-dependencies]
 rust_xlsxwriter = { version = "0.102", default-features = false }
+
+# Patched fork of IronCalc 0.9.1 (see third_party/README.md).
+[patch.crates-io]
+ironcalc = { path = "../third_party/ironcalc" }
+ironcalc_base = { path = "../third_party/ironcalc_base" }
