@@ -170,6 +170,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     static var testModifiers: NSEvent.ModifierFlags?
     private var currentModifiers: NSEvent.ModifierFlags { GridView.testModifiers ?? NSApp.currentEvent?.modifierFlags ?? [] }
 
+    /// Format Painter armed: the next selection receives the copied formatting.
+    var formatPainterArmed = false { didSet { window?.invalidateCursorRects(for: self) } }
+
     // AutoFilter (one table per sheet)
     private(set) var filters: [Int: FilterState] = [:]
     private var filterPopover: NSPopover?
@@ -665,6 +668,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
             select(range: GridRange(r0: 0, c0: selection.c0, r1: Sheet.maxRows - 1, c1: selection.c1), active: active)
         case 53: // esc
             if cutRange != nil { cutRange = nil; needsDisplay = true }
+            formatPainterArmed = false
         default:
             if cmd || flags.contains(.control) || (e.specialKey != nil && e.specialKey != .delete) {
                 super.keyDown(with: e)
@@ -705,6 +709,9 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
         let g = geo
         let z = zoom
         func scaled(_ r: CGRect) -> CGRect { CGRect(x: r.minX * z, y: r.minY * z, width: r.width * z, height: r.height * z) }
+        if formatPainterArmed {
+            addCursorRect(scaled(CGRect(x: headerW, y: headerH, width: viewSize.width, height: viewSize.height)), cursor: .dragCopy)
+        }
         if !isEditing { addCursorRect(scaled(fillHandleRect(g).insetBy(dx: -3, dy: -3)), cursor: .crosshair) }
         for c in scrolledCols(g).lowerBound...scrolledCols(g).upperBound {
             let right = x(c, g) + g.cols.size(c)
@@ -866,6 +873,11 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
     override func mouseUp(with e: NSEvent) {
         autoscrollTimer?.invalidate(); autoscrollTimer = nil
         lastDragEvent = nil
+        if formatPainterArmed, case .select = drag {
+            formatPainterArmed = false
+            book.pasteStyles(sheet: sheet, selection)
+            contentChanged()
+        }
         switch drag {
         case .fill(let s):
             if let t = fillTarget {

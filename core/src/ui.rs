@@ -1037,3 +1037,42 @@ fn range_intersects(a1: &str, t: &ironcalc::base::expressions::types::Area) -> b
     let (ar0, ac0, ar1, ac1) = (first.0.min(last.0), first.1.min(last.1), first.0.max(last.0), first.1.max(last.1));
     !(ar1 < t.row || ar0 > t.row + t.height - 1 || ac1 < t.column || ac0 > t.column + t.width - 1)
 }
+
+// ---------- format painter ----------
+
+static STYLE_CLIP: Mutex<Option<Vec<Vec<Style>>>> = Mutex::new(None);
+
+/// Remembers the styles of a range (max 1000 x 200) for foglio_paste_styles.
+#[no_mangle]
+pub extern "C" fn foglio_copy_styles(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    guard(-1, || {
+        let (r0, r1, c0, c1) = (r0.min(r1), r0.max(r1).min(r0.min(r1) + 999), c0.min(c1), c0.max(c1).min(c0.min(c1) + 199));
+        let mut grid = Vec::new();
+        for r in r0..=r1 {
+            let mut row = Vec::new();
+            for c in c0..=c1 {
+                row.push(b.model.get_cell_style(sheet, r, c).unwrap_or_default());
+            }
+            grid.push(row);
+        }
+        *STYLE_CLIP.lock().unwrap() = Some(grid);
+        0
+    })
+}
+
+/// Applies the remembered styles to the area, repeating the pattern like Excel's Format Painter. One undo step.
+#[no_mangle]
+pub extern "C" fn foglio_paste_styles(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> i32 {
+    let Some(b) = book(b) else { return -1 };
+    let r = guard(-1, || {
+        let clip = STYLE_CLIP.lock().unwrap();
+        let Some(styles) = clip.as_ref() else { return -1 };
+        if select(b, sheet, r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)).is_err() {
+            return -1;
+        }
+        rc(b.model.on_paste_styles(styles))
+    });
+    b.style_cache.clear();
+    r
+}

@@ -183,7 +183,7 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         fillColorWell.action = #selector(fillColorChanged(_:))
         fillColorWell.toolTip = L("Fill Color")
         let textColorIcon = NSImageView(image: NSImage(systemSymbolName: "character", accessibilityDescription: nil)!)
-        let fillIcon = NSImageView(image: NSImage(systemSymbolName: "paintbrush.fill", accessibilityDescription: nil)!)
+        let fillIcon = NSImageView(image: NSImage(systemSymbolName: "drop.fill", accessibilityDescription: nil)!)
         for i in [textColorIcon, fillIcon] { i.contentTintColor = .secondaryLabelColor }
         for w in [textColorWell, fillColorWell] { w.widthAnchor.constraint(equalToConstant: 38).isActive = true }
 
@@ -237,13 +237,14 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
         let filter = button("line.3.horizontal.decrease.circle", "Filter", #selector(GridView.toggleFilter(_:)))
         filter.target = nil
 
+        let painter = button("paintbrush.pointed", "Format Painter", #selector(formatPainter(_:)))
         let undo = button("arrow.uturn.backward", "Undo (⌘Z)", #selector(GridView.undo(_:)))
         undo.target = nil
         let redo = button("arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(GridView.redo(_:)))
         redo.target = nil
 
         let groups: [(NSView, NSStackView.VisibilityPriority)] = [
-            (group([undo, redo]), .mustHold),
+            (group([undo, redo, painter]), .mustHold),
             (divider(), .mustHold),
             (group([fontSizeBox, boldButton, italicButton, underlineButton, strike]), .mustHold),
             (divider(), .detachOnlyIfNecessary),
@@ -588,6 +589,12 @@ final class SheetWindowController: NSWindowController, NSWindowDelegate, GridVie
 
     // MARK: - Formatting actions
 
+    @objc func formatPainter(_ sender: Any?) {
+        grid.commitEditing(move: nil)
+        grid.book.copyStyles(sheet: grid.sheet, grid.selection)
+        grid.formatPainterArmed = true
+        window?.makeFirstResponder(grid)
+    }
     @objc func boldAction(_ sender: Any?) { grid.toggleStyle("font.b") }
     @objc func italicAction(_ sender: Any?) { grid.toggleStyle("font.i") }
     @objc func underlineAction(_ sender: Any?) { grid.toggleStyle("font.u") }

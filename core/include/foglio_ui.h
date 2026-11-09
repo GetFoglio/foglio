@@ -73,3 +73,7 @@ int32_t foglio_add_cf(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int
                       uint32_t kind, uint32_t op, const char *v1, const char *v2, uint32_t style);
 // Removes rules intersecting the area; r0 <= 0 clears the whole sheet. Returns the number removed.
 int32_t foglio_clear_cf(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
+
+// Format Painter: remember the styles of a range, then apply them (tiled) to another range.
+int32_t foglio_copy_styles(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);
+int32_t foglio_paste_styles(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1);

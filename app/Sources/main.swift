@@ -302,6 +302,8 @@ enum UIScript {
                 }
             case "fillsel": c.grid.commitEditing(move: nil, fillSelection: true)
             case "sortasc": c.grid.sortAscending(nil)
+            case "painter": c.formatPainter(nil)
+            case "styleof": if let ref = parseA1(arg) { let st = c.grid.book.style(sheet: c.grid.sheet, row: ref.row, col: ref.col); print("STYLE \(arg) bold=\(st.bold) bg=\(String(st.bg, radix: 16))") }
             case "cf": // cf kind op value
                 let p = arg.split(separator: " ").map(String.init)
                 if p.count >= 2, let k = UInt32(p[0]), let o = UInt32(p[1]) {
