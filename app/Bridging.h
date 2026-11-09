@@ -3,3 +3,4 @@
 #include "../core/include/foglio_io.h"
 #include "../core/include/foglio_features.h"
 #include "../core/include/foglio_charts.h"
+#include "../core/include/foglio_pictures.h"

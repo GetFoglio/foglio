@@ -430,6 +430,7 @@ enum UIScript {
                     print("POPUP \(type(of: w)) \((w as? CompletionPopup)?.items.prefix(5).joined(separator: ",") ?? "")")
                 }
             case "chart": ChartsUI.script(arg, on: c)   // Foglio charts: see ChartsUI.script
+            case "pic": PicturesUI.script(arg, on: c)   // Foglio pictures: see PicturesUI.script
             case "dump":
                 func walk(_ v: NSView, _ depth: Int) {
                     if v is NSButton || v is NSTextField || v is NSPopUpButton {

@@ -390,3 +390,36 @@
 "This workbook is protected with a password. Foglio can't open encrypted files yet." = "Questa cartella di lavoro è protetta da password. Foglio non può ancora aprire file crittografati.";
 "This file is in a very old Excel format (Excel 4 or earlier) that Foglio can't read." = "Questo file è in un formato Excel molto vecchio (Excel 4 o precedente) che Foglio non può leggere.";
 "The file is damaged or isn't a valid spreadsheet." = "Il file è danneggiato o non è un foglio di calcolo valido.";
+
+/* Pictures */
+"Picture" = "Immagine";
+"Picture…" = "Immagine…";
+"Choose the pictures to insert" = "Scegli le immagini da inserire";
+"Some pictures could not be inserted" = "Alcune immagini non sono state inserite";
+"These files are not images Foglio can read: %@" = "Questi file non sono immagini che Foglio può leggere: %@";
+"Crop" = "Ritaglia";
+"Reset Crop" = "Reimposta ritaglio";
+"Reset Size" = "Reimposta dimensioni";
+"Place in Cell" = "Posiziona nella cella";
+"Place over Cells" = "Posiziona sopra le celle";
+"Bring Forward" = "Porta avanti";
+"Send Backward" = "Porta indietro";
+"Bring to Front" = "Porta in primo piano";
+"Send to Back" = "Porta in secondo piano";
+"Alt Text" = "Testo alternativo";
+"Alt Text…" = "Testo alternativo…";
+"Describe the picture for people who use a screen reader." = "Descrivi l'immagine per chi usa un'utilità per la lettura dello schermo.";
+"Description" = "Descrizione";
+"Change Picture…" = "Cambia immagine…";
+"Compress Pictures" = "Comprimi immagini";
+"Compress Pictures…" = "Comprimi immagini…";
+"Apply only to this picture" = "Applica solo a questa immagine";
+"Delete cropped areas of pictures" = "Elimina aree ritagliate delle immagini";
+"Resolution:" = "Risoluzione:";
+"High fidelity: keeps the original quality" = "Alta fedeltà: mantiene la qualità originale";
+"Print (220 ppi)" = "Stampa (220 ppi)";
+"Web (150 ppi)" = "Web (150 ppi)";
+"E-mail (96 ppi)" = "Posta elettronica (96 ppi)";
+"Calculating…" = "Calcolo in corso…";
+"Size of the pictures: %@ → %@" = "Dimensione delle immagini: %@ → %@";
+"There are no pictures on this sheet." = "In questo foglio non ci sono immagini.";

@@ -229,6 +229,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     // MARK: Charts (Foglio charts integration: ChartsLayer.swift draws and positions the charts)
     lazy var chartLayer = ChartLayer(grid: self)
+    lazy var pictureLayer = PictureLayer(grid: self)   // Foglio pictures (PicturesLayer.swift), positioned by chartLayer
     func chartGeometry() -> ChartGridGeometry {
         let g = geo
         return ChartGridGeometry(zoom: zoom, header: CGSize(width: headerW, height: headerH), frozen: CGSize(width: frozenW(g), height: frozenH(g)),
@@ -1481,6 +1482,7 @@ final class GridView: NSView, NSTextFieldDelegate, NSMenuItemValidation {
 
     @objc func paste(_ sender: Any?) {
         guard commitIfEditing() else { return }
+        if PicturesUI.pasteIfPicture(self) { return }   // Foglio pictures: copied pictures, image data without text
         let pb = NSPasteboard.general
         if let t = pb.string(forType: GridView.pasteboardType), let token = UInt64(t),
            let text = pb.string(forType: .string) {

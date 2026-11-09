@@ -133,6 +133,7 @@ enum Menus {
             item("AutoSum", #selector(W.autoSumMenu(_:)), "t", [.command, .shift], tag: 0),
             item("Function…", #selector(W.insertFunction(_:))),
             ChartsUI.insertMenuItem(),   // Foglio charts: Insert ▸ Chart (ChartsLayer.swift)
+            PicturesUI.insertMenuItem(),   // Foglio pictures: Insert ▸ Picture… (PicturesUI.swift)
             .separator(),
             item("New Comment", #selector(W.editComment(_:)), String(Character(UnicodeScalar(NSF2FunctionKey)!)), [.shift]),
             item("Delete Comment", #selector(W.deleteComment(_:))),
@@ -171,6 +172,7 @@ enum Menus {
             item("Merge & Center", #selector(GridView.mergeAndCenter(_:))),
             submenu("Borders", borderItems()),
             ConditionalFormatMenu.menu(),
+            PicturesUI.formatMenuItem(),   // Foglio pictures: Format ▸ Picture
             .separator(),
             submenu("Row", [
                 item("Height…", #selector(GridView.rowHeight(_:))),

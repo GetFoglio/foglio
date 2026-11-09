@@ -52,7 +52,16 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
 - **Comments/notes** with red-corner indicators and hover popups; **hyperlinks** (⌘K, ⌘-click to open).
 - **Charts** (column, bar, line, pie, doughnut, area, scatter, stacked variants): Insert ▸ Chart or the
   toolbar, move/resize on the sheet, properties sheet; read from and saved to `.xlsx`.
-- Printing: fit all columns on one page, optional gridlines, orientation and paper from the Print panel.
+- **Pictures**: Insert ▸ Picture… (several at once), paste an image (⌘V) or drop image files on the grid
+  (PNG, JPEG, GIF, TIFF, HEIC, …). Move, resize (corners keep the aspect ratio, ⇧ frees them), nudge with
+  the arrow keys, cut/copy/paste, Delete. Format ▸ Picture (and the right-click menu): **Crop** (Excel-style
+  crop handles; drag inside to move the image under the frame; Return/Esc/click outside to finish), Reset
+  Crop, Reset Size, **Place in Cell** / Place over Cells, Bring Forward/Send Backward (shared with charts),
+  Alt Text…, Change Picture…, **Compress Pictures…** (selected picture or all; delete cropped areas; high
+  fidelity, 220, 150 or 96 ppi of the displayed size; photos become JPEG, transparent or flat-colour images
+  PNG; shows the size before and after). Every change is one undo step.
+- Printing: fit all columns on one page, optional gridlines, orientation and paper from the Print panel;
+  pictures and charts are printed (and exported to PDF) with the cells.
 - UI in English and Italian.
 
 **Files**
@@ -60,8 +69,16 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
   row heights, frozen panes, multiple sheets).
 - Opens `.xlsm` (macros are not run), `.xls`, `.xlsb`, `.ods` (values, formulas and dates), and
   `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and decimal-separator detection.
-- Comments, data validation, hyperlinks, tab colours, defined names, conditional formatting and charts
-  are read from and written to `.xlsx`.
+- Comments, data validation, hyperlinks, tab colours, defined names, conditional formatting, charts
+  and pictures are read from and written to `.xlsx`.
+- Pictures in `.xlsx`: `xl/media/imageN.png|jpeg` (an image used several times is stored once),
+  `<xdr:pic>` with cropping (`a:srcRect`), alt text and `editAs` (move and size with cells / move only /
+  don't move); charts and pictures share the sheet's drawing part and keep their stacking order.
+  Pictures written by Excel, LibreOffice, openpyxl, Apache POI (two-cell, one-cell and absolute anchors)
+  are read; EMF/WMF pictures are kept and saved back but shown as a placeholder. *Place in Cell* is saved
+  as a picture that moves and sizes with its cell (not Excel 365's rich-value "picture in cell" format,
+  so it opens in every Excel as a normal picture over that cell); Excel 365 pictures in cells
+  (`xl/richData`) are read as pictures placed in their cells.
 - Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
 
 **Formulas** — ~500 Excel functions via a patched fork of the [IronCalc](https://github.com/ironcalc/IronCalc) engine
@@ -81,13 +98,14 @@ families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit
 | Open a 100k-row xlsx (300k formulas) | 0.9 s, ~113 MB | | |
 | One edit, 1,000 VLOOKUPs over 20k rows | ~3 ms (incremental recalculation) | | |
 
-**Not yet supported**: real pivot tables (use *Summarize by*), images, macros, password-protected files,
-data bars/icon sets, sparklines, threaded comments (shown as plain notes), charts in printouts.
+**Not yet supported**: real pivot tables (use *Summarize by*), shapes/text boxes/SmartArt (skipped when
+reading), picture effects (borders, shadows, rotation), macros, password-protected files, data
+bars/icon sets, sparklines, threaded comments (shown as plain notes).
 
 ## Testing
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 46 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 68 UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```

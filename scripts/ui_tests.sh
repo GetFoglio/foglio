@@ -59,6 +59,17 @@ run "chart insert" "$CHART_DATA;; chart column A1:B3;; chart list" "CHARTS 1 sel
 run "chart delete key + undo" "$CHART_DATA;; chart line A1:C3;; chart click 0;; key delete;; chart list;; key cmd+z;; chart list" "CHARTS 0" "CHARTS 1"
 run "chart move + properties" "$CHART_DATA;; chart column A1:C3;; chart drag 0 200 0;; chart props 0 title=Totale_mese range=A1:B3;; chart list" "title=Totale mese" "range=A1:B3" "from=G1"
 run "chart save + reopen" "$CHART_DATA;; chart pie A1:B3;; chart line A1:C3;; chart roundtrip /tmp/foglio-ui-chart.xlsx" "REOPENED CHARTS 2 kinds=pie,line titles=Vendite,"
+# Pictures
+PIC_MAKE="pic make /tmp/foglio-ui-logo.png 300 200;; pic make /tmp/foglio-ui-photo.jpg 2400 1600 jpeg"
+run "picture insert from file" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png B2;; pic list" "PICTURES 1 selected=0" "PICTURE 0 from=B2" "size=300x200 crop=0,0,0,0 incell=false edit=one_cell format=png"
+run "picture move + resize + undo" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png B2;; pic click 0;; pic drag 0 90 45;; pic list;; pic resize 0 -150 0;; pic list;; key cmd+z;; pic list" "PICTURE 0 from=C4" "size=150x100" "size=300x200"
+run "picture crop" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png B2;; pic click 0;; pic crop 0 right -60;; pic list" "size=240x200 crop=0,0,20000,0" "cropping=false"
+run "picture in cell follows row height" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png C3;; pic incell 0;; pic list;; pic rowheight 3 100;; pic list;; pic overcells 0;; pic list" "incell=true edit=two_cell" "rect=219,61,25,17" "rect=193,74,78,52" "incell=false edit=one_cell"
+run "picture compress" "$PIC_MAKE;; pic insert /tmp/foglio-ui-photo.jpg B2;; pic click 0;; pic crop 0 right -100;; pic compress all 96 crop;; pic list;; key cmd+z;; pic list" "smaller=true" "crop=0,0,0,0" "px=2400x1600"
+run "picture save + reopen" "$PIC_MAKE;; $CHART_DATA;; chart column A1:B3;; pic insert /tmp/foglio-ui-logo.png B6;; pic insert /tmp/foglio-ui-photo.jpg F12;; pic click 1;; pic crop 1 bottom -40;; pic incell 0;; pic roundtrip /tmp/foglio-ui-pictures.xlsx" "REOPENED PICTURES 2 charts=1 incell=1 cropped=1 formats=png,jpeg"
+run "paste image from another app" "$PIC_MAKE;; pic pbimage /tmp/foglio-ui-logo.png;; click D4;; key cmd+v;; pic list" "PICTURES 1 selected=0" "from=D4"
+run "picture copy, paste, delete + undo" "$PIC_MAKE;; pic insert /tmp/foglio-ui-logo.png B2;; pic click 0;; key cmd+c;; click H3;; key cmd+v;; pic list;; key delete;; pic list;; key cmd+z;; pic list" "PICTURES 2 selected=1" "PICTURE 1 from=H3" "PICTURES 1 selected=none" "PICTURES 2"
+run "picture stacking with charts" "$PIC_MAKE;; $CHART_DATA;; pic insert /tmp/foglio-ui-logo.png E2;; chart column A1:B3;; pic list;; pic front 0;; pic list" "ORDER p0,c0" "ORDER c0,p0"
 run "comments" "comment B2 Nota di prova;; key cmd+shift+n;; tab 0;; state" "editing=false"
 run "validation list" "validlist A1:A5 Sì;No;Forse;; select A2;; listitems;; checkvalid A3 Boh;; checkvalid A3 no" "VALID ok" "ITEMS Sì,No,Forse" "CHECK 1" "CHECK 0"
 run "summarize" "input A1=Cliente;; input B1=Importo;; input A2=Rossi;; input B2=10;; input A3=Bianchi;; input B3=5;; input A4=Rossi;; input B4=7;; select A1;; summarize A1:B4 A B 0;; sheets;; print B3" "current=1" "CELL B3 = 17"
@@ -77,5 +88,9 @@ run "internal link with quoted sheet" "key cmd+shift+n;; tab 0;; input A1=x;; fo
 if [[ -f /private/tmp/claude-501/poi-test/files/123233_charts.xlsx ]]; then
   out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP /private/tmp/claude-501/poi-test/files/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)
   [[ $out -eq 4 ]] && echo "✓ charts of the first sheet load on open" || { echo "✗ charts on open (got $out)"; fail=1; }
+fi
+if [[ -f /private/tmp/claude-501/poi-test/files/WithDrawing.xlsx ]]; then
+  out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="pic panes" timeout 40 $APP /private/tmp/claude-501/poi-test/files/WithDrawing.xlsx 2>&1 | grep -c PICTUREVIEW)
+  [[ $out -eq 5 ]] && echo "✓ pictures of an Excel file load on open" || { echo "✗ pictures on open (got $out)"; fail=1; }
 fi
 exit $fail

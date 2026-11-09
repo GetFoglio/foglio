@@ -137,7 +137,8 @@ final class PrintView: NSView {
         if selection.cellCount > 1 && !selection.isFullColumns && !selection.isFullRows {
             range = selection
         } else {
-            range = GridRange(r0: 0, c0: 0, r1: l.maxRow, c1: l.maxCol)
+            let d = PicturesUI.drawingExtent(book: book, sheet: sheet)   // Foglio pictures/charts are printed too
+            range = GridRange(r0: 0, c0: 0, r1: max(l.maxRow, d.row), c1: max(l.maxCol, d.col))
         }
         painter.printing = true
         painter.fontScale = 1
@@ -229,5 +230,7 @@ final class PrintView: NSView {
         let data = CellData(book.viewport(sheet: sheet, rows: r0...r1, cols: c0...c1))
         painter.paint(rows: r0...r1, cols: c0...c1, data: data, merges: merges, showGrid: printGridlines, hair: 0.5, clip: dirtyRect,
                       gridColor: .lightGray, rect: rect, colWidth: { self.rect(r0, $0).width }, rowHeight: { self.rect($0, c0).height })
+        // Foglio pictures and charts (PicturesUI.swift): grid points -> page points as for the cells.
+        PicturesUI.drawDrawings(book: book, sheet: sheet, cellRect: { self.rect($0, $1) }, pointScale: unit * scale / 0.85, clip: dirtyRect)
     }
 }

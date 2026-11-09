@@ -45,7 +45,7 @@ final class ChartLayer {
     private weak var grid: GridView?
     let book: Workbook
     /// Charts anchored in frozen rows/columns (above everything) and charts in the scrolling part (clipped by the frozen panes).
-    private let mainPane = ChartPane(), scrollPane = ChartPane()
+    let mainPane = ChartPane(), scrollPane = ChartPane()   // also host the picture views (PicturesLayer.swift)
     private(set) var views: [ChartView] = []
     private(set) var charts: [ChartInfo] = []
     private var selected: Int?
@@ -77,6 +77,7 @@ final class ChartLayer {
             v.isSelected = c.index == selected
             v.invalidateData()
         }
+        grid?.pictureLayer.reloadData()   // Foglio pictures: same panes, shared stacking order
         layoutCharts()
     }
 
@@ -106,11 +107,12 @@ final class ChartLayer {
             let f = viewRect.insetBy(dx: -ChartView.margin, dy: -ChartView.margin).integral
             if v.frame != f { v.frame = f } else { v.needsDisplay = true }
         }
+        grid.pictureLayer.layout()   // Foglio pictures
     }
 
     /// The row header grows with the row numbers on screen: follow it.
     func gridDidDraw() {
-        guard !views.isEmpty, let grid else { return }
+        guard let grid, !views.isEmpty || !grid.pictureLayer.views.isEmpty else { return }
         let h = grid.chartGeometry().header
         if h != lastHeader { DispatchQueue.main.async { [weak self] in self?.layoutCharts() } }
     }
