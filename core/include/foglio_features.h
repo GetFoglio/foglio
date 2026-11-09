@@ -85,6 +85,10 @@ char *foglio_validation_get(const FoglioBook *b, uint32_t sheet, int32_t row, in
 // no list validation: the inline items, or the displayed (formatted) values of the
 // non-empty cells of the referenced range, evaluated for this cell (max 10000).
 char *foglio_validation_list(FoglioBook *b, uint32_t sheet, int32_t row, int32_t col);
+// The same items as [{"display": "…", "input": "…"}, …]: "input" is what to enter in the cell
+// when the item is picked (for a range source, the cell's value as typed, e.g. "0,3333333333333"
+// rather than its formatted "0,33 €"; text that would read as a number gets a leading ').
+char *foglio_validation_list_items(FoglioBook *b, uint32_t sheet, int32_t row, int32_t col);
 
 enum {
     FOGLIO_VALIDATION_OK = 0,

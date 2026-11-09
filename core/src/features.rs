@@ -148,6 +148,141 @@ pub extern "C" fn foglio_validation_list(b: *mut FoglioBook, sheet: u32, row: i3
     })
 }
 
+/// The items of the list validation of the cell as JSON [{"display": "…", "input": "…"}, …]:
+/// what the dropdown shows and what to enter in the cell when the item is picked (for a
+/// list taken from cells, the source cell's value as it would be typed, not its formatted
+/// text). NULL if the cell has no list validation.
+#[no_mangle]
+pub extern "C" fn foglio_validation_list_items(b: *mut FoglioBook, sheet: u32, row: i32, col: i32) -> *mut c_char {
+    let Some(b) = book(b) else { return ptr::null_mut() };
+    guard(ptr::null_mut(), || {
+        let Ok(Some(items)) = b.model.get_data_validation_list(sheet, row, col) else { return ptr::null_mut() };
+        // Only trusted when it lists exactly what the engine shows (otherwise: input = display).
+        let raw = list_source_inputs(b, sheet, row, col)
+            .filter(|v| v.len() == items.len() && v.iter().zip(&items).all(|((d, _), i)| d == i));
+        let out: Vec<Value> = match raw {
+            Some(v) => v.into_iter().map(|(d, i)| json!({"display": d, "input": i})).collect(),
+            None => items.into_iter().map(|d| json!({"display": d, "input": d})).collect(),
+        };
+        to_c(Value::Array(out).to_string())
+    })
+}
+
+/// (displayed, typed) values of the source cells of a list rule that refers to a range
+/// ("$A$1:$A$9", "Sheet2!A1:A9", "'O''Brien'!$B$2:$B$5", a defined name of such a range),
+/// in the order the engine lists them. None for inline lists and other formulas.
+fn list_source_inputs(b: &mut FoglioBook, sheet: u32, row: i32, col: i32) -> Option<Vec<(String, String)>> {
+    let rule = b.model.get_data_validation(sheet, row, col).ok()??;
+    let mut f = rule.formula1.clone()?.trim().trim_start_matches('=').trim().to_string();
+    if ironcalc::base::data_validation::inline_list_items(&f).is_some() {
+        return None;
+    }
+    let mut relative = true;
+    if let Some((_, _, def)) = b
+        .model
+        .get_defined_name_list()
+        .into_iter()
+        .filter(|(n, s, _)| n.eq_ignore_ascii_case(&f) && (s.is_none() || *s == Some(sheet)))
+        .max_by_key(|(_, s, _)| s.is_some())
+    {
+        f = def.trim().trim_start_matches('=').to_string();
+        relative = false;
+    }
+    // optional sheet part
+    let (src_sheet, reference) = match f.rfind('!') {
+        Some(i) => {
+            let name = f[..i].trim();
+            let name = match name.strip_prefix('\'').and_then(|n| n.strip_suffix('\'')) {
+                Some(q) => q.replace("''", "'"),
+                None => name.to_string(),
+            };
+            let props = b.model.get_worksheets_properties();
+            let idx = props.iter().position(|p| p.name.eq_ignore_ascii_case(&name))?;
+            (idx as u32, f[i + 1..].to_string())
+        }
+        None => (sheet, f.clone()),
+    };
+    // "A1" or "A1:B5", with optional $; relative parts follow the cell like the engine does
+    let anchor = ironcalc::base::data_validation::parse_sqref_rects(&rule.sqref).first().map(|r| (r.0, r.1)).unwrap_or((1, 1));
+    let (dr, dc) = if relative { (row - anchor.0, col - anchor.1) } else { (0, 0) };
+    let corner = |s: &str| -> Option<(i32, i32)> {
+        let s = s.trim();
+        let (col_abs, s) = match s.strip_prefix('$') { Some(t) => (true, t), None => (false, s) };
+        let letters: String = s.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        let rest = &s[letters.len()..];
+        let (row_abs, digits) = match rest.strip_prefix('$') { Some(t) => (true, t), None => (false, rest) };
+        if letters.is_empty() || digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let c = ironcalc::base::expressions::utils::column_to_number(&letters.to_uppercase()).ok()?;
+        let r = digits.parse::<i32>().ok()?;
+        Some((if row_abs { r } else { r + dr }, if col_abs { c } else { c + dc }))
+    };
+    let (a, z) = match reference.split_once(':') {
+        Some((a, z)) => (corner(a)?, corner(z)?),
+        None => {
+            let a = corner(&reference)?;
+            (a, a)
+        }
+    };
+    let (r0, r1, c0, c1) = (a.0.min(z.0), a.0.max(z.0), a.1.min(z.1), a.1.max(z.1));
+    if r0 < 1 || c0 < 1 {
+        return None;
+    }
+    // the engine stops at its item limit; so do we (and the result is then compared)
+    let dim = b.model.get_model().workbook.worksheets.get(src_sheet as usize)?.dimension();
+    let (r1, c1) = (r1.min(dim.max_row), c1.min(dim.max_column));
+    let mut out = Vec::new();
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            if out.len() > 10_000 {
+                return None;
+            }
+            let display = b.model.get_formatted_cell_value(src_sheet, r, c).unwrap_or_default();
+            if display.is_empty() {
+                continue;
+            }
+            let model = b.model.get_model();
+            let is_formula = model
+                .workbook
+                .worksheets
+                .get(src_sheet as usize)
+                .and_then(|ws| ws.cell(r, c).map(|x| x.get_formula().is_some()))
+                .unwrap_or(false);
+            let input = if !is_formula {
+                b.model.get_cell_content(src_sheet, r, c).unwrap_or_else(|_| display.clone())
+            } else {
+                match model.get_cell_value_by_index(src_sheet, r, c).unwrap_or(CellValue::None) {
+                    CellValue::Number(n) => {
+                        let lit = if n.fract() == 0.0 && n.abs() < 1e15 { format!("={}", n as i64) } else { format!("={n}") };
+                        b.model.english_formula_to_user(src_sheet, r, c, &lit).trim_start_matches('=').to_string()
+                    }
+                    CellValue::Boolean(v) => b
+                        .model
+                        .english_formula_to_user(src_sheet, r, c, if v { "=TRUE" } else { "=FALSE" })
+                        .trim_start_matches('=')
+                        .to_string(),
+                    CellValue::String(s) => literal_text_input(&s),
+                    CellValue::None => display.clone(),
+                }
+            };
+            out.push((display, input));
+        }
+    }
+    Some(out)
+}
+
+/// Text to type so that it stays text (a leading apostrophe when it could read as a number,
+/// date, boolean or formula).
+fn literal_text_input(s: &str) -> String {
+    let t = s.trim();
+    let first = t.chars().next();
+    let risky = matches!(first, Some('=' | '+' | '-' | '\'' | '@'))
+        || first.is_some_and(|c| c.is_ascii_digit() || c == '.' || c == ',')
+        || ["TRUE", "FALSE", "VERO", "FALSO", "WAHR", "FALSCH", "VERDADERO", "VRAI", "FAUX"].contains(&t.to_uppercase().as_str());
+    if risky { format!("'{s}") } else { s.to_string() }
+}
+
 /// Checks what the user is about to enter in the cell. 0 valid; otherwise the alert to
 /// show: 1 stop, 2 warning, 3 information, with the rule's title and message (possibly
 /// empty) in *title_out / *message_out (if not NULL; free with foglio_string_free).
@@ -221,14 +356,26 @@ fn link_address(link: &Link) -> (String, Option<String>) {
 pub extern "C" fn foglio_link_get(b: *const FoglioBook, sheet: u32, row: i32, col: i32) -> *mut c_char {
     let Some(b) = book_ref(b) else { return ptr::null_mut() };
     guard(ptr::null_mut(), || {
+        // Called on every hover: a direct map lookup; only formula cells can carry a dynamic
+        // (HYPERLINK) link, and only for those the full list is built.
+        let is_formula = || {
+            b.model
+                .get_model()
+                .workbook
+                .worksheets
+                .get(sheet as usize)
+                .and_then(|ws| ws.cell(row, col).map(|c| c.get_formula().is_some()))
+                .unwrap_or(false)
+        };
         let found = match b.model.get_cell_link(sheet, row, col) {
             Ok(Some(link)) => Some((link, false)),
-            _ => b
+            _ if is_formula() => b
                 .model
                 .get_links_list(sheet)
                 .ok()
                 .and_then(|l| l.into_iter().find(|v| v.row == row && v.column == col))
                 .map(|v| (v.link, v.dynamic)),
+            _ => None,
         };
         match found {
             Some((link, dynamic)) => {

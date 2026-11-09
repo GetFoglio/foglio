@@ -439,6 +439,26 @@ fn select(b: &mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) ->
     b.model.set_selected_range(r0, c0, r1, c1)
 }
 
+/// The rich copy of a range (and its tab-separated text), without touching the user's clipboard.
+fn make_clip(b: &mut FoglioBook, addr: usize, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32) -> Option<(String, Clip)> {
+    select(b, sheet, r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)).ok()?;
+    let clip = b.model.copy_to_clipboard().ok()?;
+    let v = serde_json::to_value(&clip).ok()?;
+    let csv = v.get("csv").and_then(|c| c.as_str()).unwrap_or("").to_string();
+    let range = v.get("range").and_then(|r| serde_json::from_value::<(i32, i32, i32, i32)>(r.clone()).ok())?;
+    Some((csv, Clip { token: 0, book: addr, sheet, range, data: v.get("data").cloned().unwrap_or(Value::Null) }))
+}
+
+/// Pastes `clip` with its top-left corner at (row, col) of `sheet`.
+fn paste_clip(b: &mut FoglioBook, clip: &Clip, sheet: u32, row: i32, col: i32, cut: bool) -> i32 {
+    let Ok(data) = serde_json::from_value::<ClipboardData>(clip.data.clone()) else { return -1 };
+    let (cr0, cc0, cr1, cc1) = clip.range;
+    if select(b, sheet, row, col, row + (cr1 - cr0), col + (cc1 - cc0)).is_err() {
+        return -1;
+    }
+    rc(b.model.paste_from_clipboard(clip.sheet, clip.range, &data, cut))
+}
+
 /// Copies a range. Returns tab-separated text (for other apps) and stores the rich copy internally.
 /// `out_token` receives an id the UI puts on the pasteboard to recognise its own copy.
 #[no_mangle]
@@ -446,23 +466,47 @@ pub unsafe extern "C" fn foglio_copy(b: *mut FoglioBook, sheet: u32, r0: i32, c0
     let addr = b as usize;
     let Some(b) = book(b) else { return ptr::null_mut() };
     guard(ptr::null_mut(), || {
-        if select(b, sheet, r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)).is_err() {
-            return ptr::null_mut();
-        }
-        let Ok(clip) = b.model.copy_to_clipboard() else { return ptr::null_mut() };
-        let Ok(v) = serde_json::to_value(&clip) else { return ptr::null_mut() };
-        let csv = v.get("csv").and_then(|c| c.as_str()).unwrap_or("").to_string();
-        let range = v.get("range").and_then(|r| serde_json::from_value::<(i32, i32, i32, i32)>(r.clone()).ok());
-        let Some(range) = range else { return ptr::null_mut() };
+        let Some((csv, mut clip)) = make_clip(b, addr, sheet, r0, c0, r1, c1) else { return ptr::null_mut() };
         let mut t = TOKEN.lock().unwrap();
         *t += 1;
         let token = *t;
-        *CLIP.lock().unwrap() = Some(Clip { token, book: addr, sheet, range, data: v.get("data").cloned().unwrap_or(Value::Null) });
+        clip.token = token;
+        *CLIP.lock().unwrap() = Some(clip);
         if !out_token.is_null() {
             *out_token = token;
         }
         to_c(csv)
     })
+}
+
+/// Moves (`is_cut`) or copies a range so that its top-left corner lands on (row, col), like a cut/copy
+/// and paste, but without replacing the user's internal clipboard. One undo step. 0 on success.
+#[no_mangle]
+pub extern "C" fn foglio_move_range(b: *mut FoglioBook, sheet: u32, r0: i32, c0: i32, r1: i32, c1: i32, row: i32, col: i32, is_cut: bool) -> i32 {
+    let addr = b as usize;
+    let Some(b) = book(b) else { return -1 };
+    let r = guard(-1, || match make_clip(b, addr, sheet, r0, c0, r1, c1) {
+        Some((_, clip)) => paste_clip(b, &clip, sheet, row, col, is_cut),
+        None => -1,
+    });
+    b.style_cache.clear();
+    r
+}
+
+/// Starts an undo group: every change until the matching foglio_end_group is undone/redone
+/// as one step. Groups nest.
+#[no_mangle]
+pub extern "C" fn foglio_begin_group(b: *mut FoglioBook) {
+    if let Some(b) = book(b) {
+        b.model.begin_history_group();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn foglio_end_group(b: *mut FoglioBook) {
+    if let Some(b) = book(b) {
+        b.model.end_history_group();
+    }
 }
 
 /// Pastes the internal copy identified by `token` at the target range. Returns -2 if the token is stale.
@@ -573,7 +617,9 @@ pub unsafe extern "C" fn foglio_sort_multi(b: *mut FoglioBook, sheet: u32, r0: i
                     _ => b.model.get_cell_content(sheet, *src, c).unwrap_or_default(),
                 };
                 let style = b.model.get_cell_style(sheet, *src, c).unwrap_or_default();
-                row.insert(c.to_string(), json!({"text": text, "is_spill": false, "style": style, "link": null}));
+                // hyperlinks travel with their row
+                let link = model.get_cell_link(sheet, *src, c).ok().flatten();
+                row.insert(c.to_string(), json!({"text": text, "is_spill": false, "style": style, "link": link}));
             }
             data.insert(dst.to_string(), Value::Object(row));
         }
@@ -1166,7 +1212,9 @@ pub extern "C" fn foglio_remove_duplicates(b: *mut FoglioBook, sheet: u32, r0: i
                     _ => b.model.get_cell_content(sheet, *src, c).unwrap_or_default(),
                 };
                 let style = b.model.get_cell_style(sheet, *src, c).unwrap_or_default();
-                row.insert(c.to_string(), json!({"text": text, "is_spill": false, "style": style, "link": null}));
+                // hyperlinks travel with their row
+                let link = model.get_cell_link(sheet, *src, c).ok().flatten();
+                row.insert(c.to_string(), json!({"text": text, "is_spill": false, "style": style, "link": link}));
             }
             data.insert(dst.to_string(), Value::Object(row));
         }
@@ -1175,13 +1223,16 @@ pub extern "C" fn foglio_remove_duplicates(b: *mut FoglioBook, sheet: u32, r0: i
         if select(b, sheet, r0, c0, new_last, c1).is_err() {
             return -1;
         }
-        if b.model.paste_from_clipboard(sheet, (r0, c0, new_last, c1), &data, false).is_err() {
-            return -1;
+        // paste + clears are one undo step
+        b.model.begin_history_group();
+        let pasted = b.model.paste_from_clipboard(sheet, (r0, c0, new_last, c1), &data, false).is_ok();
+        if pasted {
+            let rest = area(sheet, new_last + 1, c0, r1, c1);
+            let _ = b.model.range_clear_contents(&rest);
+            let _ = b.model.range_clear_formatting(&rest);
         }
-        let rest = area(sheet, new_last + 1, c0, r1, c1);
-        let _ = b.model.range_clear_contents(&rest);
-        let _ = b.model.range_clear_formatting(&rest);
-        removed as i32
+        b.model.end_history_group();
+        if pasted { removed as i32 } else { -1 }
     });
     b.style_cache.clear();
     r

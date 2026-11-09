@@ -50,6 +50,13 @@ char *foglio_copy(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t
 int32_t foglio_paste_internal(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1,
                               uint64_t token, bool is_cut);
 int32_t foglio_paste_text(FoglioBook *b, uint32_t sheet, int32_t row, int32_t col, const char *tsv);
+// Moves (is_cut) or copies a range so its top-left corner lands on (row, col), like cut/copy + paste,
+// without replacing the internal clipboard of foglio_copy. One undo step. 0 on success.
+int32_t foglio_move_range(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1,
+                          int32_t row, int32_t col, bool is_cut);
+// Undo groups: every change between begin and the matching end is one undo step. Groups nest.
+void foglio_begin_group(FoglioBook *b);
+void foglio_end_group(FoglioBook *b);
 
 int32_t foglio_sort(FoglioBook *b, uint32_t sheet, int32_t r0, int32_t c0, int32_t r1, int32_t c1, int32_t key_col, bool ascending);
 int32_t foglio_current_region(const FoglioBook *b, uint32_t sheet, int32_t row, int32_t col, int32_t *out4);
