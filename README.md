@@ -5,9 +5,29 @@
 <h1 align="center">Foglio</h1>
 
 <p align="center">
-  A lightweight, native spreadsheet for macOS.<br>
-  Excel-like, open formats, tiny footprint.<br>
-  <a href="https://getfoglio.app">getfoglio.app</a> · <a href="https://github.com/GetFoglio/foglio/releases/latest">Download</a>
+  A free, lightweight, native spreadsheet for macOS that opens your Excel files.<br>
+  7.5 MB download · opens in 0.24 s · no account, no subscription.
+</p>
+
+<p align="center">
+  <a href="https://github.com/GetFoglio/foglio/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/GetFoglio/foglio?label=release&color=1f9d6b"></a>
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-1f9d6b">
+  <img alt="Apple silicon and Intel" src="https://img.shields.io/badge/Apple%20silicon%20%2B%20Intel-universal-1f9d6b">
+  <a href="#license"><img alt="License: MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-1f9d6b"></a>
+  <a href="https://github.com/GetFoglio/foglio/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/GetFoglio/foglio?style=flat&color=e3a008"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/GetFoglio/foglio/releases/download/v1.0.2/Foglio-1.0.2.dmg"><b>Download Foglio 1.0.2</b></a> ·
+  <a href="https://getfoglio.app">getfoglio.app</a> ·
+  <a href="https://github.com/GetFoglio/foglio/releases">All releases</a>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+    <img src="docs/screenshot-light.png" width="860" alt="Foglio on macOS: a sales sheet with formulas and a column chart">
+  </picture>
 </p>
 
 ---
@@ -16,8 +36,32 @@
 written in Swift/AppKit on top of a Rust calculation core. The aim is simple: open and edit
 everyday spreadsheets quickly, feel at home on macOS, and stay small.
 
-> **Status: 1.0 preview.** Foglio handles everyday spreadsheets end to end. Keep backups of
-> important files: pivot tables, macros and comments are not supported yet (see below).
+Foglio does not try to be Excel. It is the app you open when you need to read, fix or fill in a
+spreadsheet: native, fast, small, and able to open the Excel files you receive.
+
+> **Latest version: 1.0.2** (November 9, 2026). Foglio handles everyday spreadsheets end to end.
+> Keep backups of important files: pivot tables, macros and password-protected files are not
+> supported yet (see [below](#not-yet-supported)).
+
+If Foglio is useful to you, a ⭐ on GitHub helps other Mac users find it.
+
+## What's new
+
+**1.0.2** — more Excel files open exactly as they were saved, and stay that way when you save them.
+- Horizontal scroll bar fixed (it was drawn as a tiny vertical bar in the bottom-right corner).
+- Sheet zoom, "show zeros" off, default row height and AutoFilter (ranges and hidden values) are
+  read from the file and saved back; each sheet keeps its own zoom.
+- Grouped pictures (catalogues, price lists) are saved back as groups and reopen in place.
+
+**1.0.1** — fixes for real-world Excel files.
+- The grid, headers, charts and pictures are redrawn live while you resize the window.
+- Frozen panes saved by Excel as `frozenSplit` are frozen; borders of merged cells are drawn only
+  around the merge; currency symbols go where the format puts them (`13,75 €`, `[$CHF-807]`).
+- Pictures inside groups are placed where Excel places them, with smoother scrolling on sheets
+  with hundreds of pictures; the status-bar zoom follows pinch and ⌘-scroll.
+
+**1.0** — first public release. Full notes and SHA-256 checksums on the
+[releases page](https://github.com/GetFoglio/foglio/releases).
 
 ## Features
 
@@ -92,31 +136,63 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
 including XLOOKUP, FILTER/SORT/UNIQUE, LET/LAMBDA, SUMIFS, the date, text, statistical and financial
 families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit.
 
-**Small and fast** (measured on a MacBook Air M4, 16 GB, see [docs/PERFORMANCE.md](docs/PERFORMANCE.md))
+### Not yet supported
 
-| | Foglio 1.0 |
+Real pivot tables (use *Summarize by*), shapes/text boxes/SmartArt (skipped when
+reading), picture effects (borders, shadows, rotation), macros, password-protected files, data
+bars/icon sets, sparklines, threaded comments (shown as plain notes).
+
+## Speed and size
+
+Measured on a MacBook Air with an M4 processor, 16 GB, macOS 27 (release builds).
+Details and the benchmark harness: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+| | Foglio 1.0.x |
 |---|---|
-| Download (DMG, universal) | 7.5 MB |
-| App size | 19 MB (Apple silicon + Intel) |
+| Download (DMG, universal) | **7.5 MB** |
+| App size on disk | 19 MB (Apple silicon + Intel in one app) |
+| Launch to first frame (warm) | **~0.24 s** |
 | Memory, empty sheet | ~58 MB (`footprint`), 0 % CPU when idle |
-| Launch to first frame (warm) | ~0.24 s |
-| Open a 100k-row xlsx (300k formulas) | 1.1 s, ~171 MB |
-| One edit on that workbook (incremental recalculation) | ~16 ms |
+| Open a 100k-row `.xlsx` (300k formulas) | 1.1 s, ~171 MB |
+| One edit on that workbook (incremental recalculation) | **~16 ms** |
 | Full recalculation of that workbook | ~64 ms |
-| 1,000 VLOOKUPs over 10k rows | 1.3 ms (upstream IronCalc: 1.7 s) |
 
 For comparison, the Mac App Store lists Microsoft Excel at about 1.2 GB and Numbers at about 661 MB;
 the LibreOffice DMG is about 299 MB (November 2026).
 
-**Not yet supported**: real pivot tables (use *Summarize by*), shapes/text boxes/SmartArt (skipped when
-reading), picture effects (borders, shadows, rotation), macros, password-protected files, data
-bars/icon sets, sparklines, threaded comments (shown as plain notes).
+**The engine work.** Foglio uses a patched fork of IronCalc 0.9.1. Same formulas, same results,
+much less waiting:
 
-## Testing
+| 1,000 formulas over a 10,000-row table | IronCalc 0.9.1 | Foglio |
+|---|---|---|
+| `VLOOKUP(k, A:B, 2, FALSE)` | 1,703 ms | **1.3 ms** |
+| `XLOOKUP(k, A, B)` | 1,614 ms | **0.8 ms** |
+| `INDEX(B, MATCH(k, A, 0))` | 92 ms | **0.9 ms** |
+
+| Workbook | IronCalc 0.9.1 | Foglio |
+|---|---|---|
+| Edit a cell, 100k rows + 1,000 VLOOKUPs | 18.6 s | **16 ms** |
+| Edit a cell, 300k rows (900k formulas) | 280 ms | **36 ms** |
+| Open a workbook with 3,264 whole-column VLOOKUPs (Apache POI test file) | 11 s | **91 ms** |
+
+## Tests and compatibility
+
+| Suite | What it checks | Result (1.0.2) |
+|---|---|---|
+| UI tests (`scripts/ui_tests.sh`) | The real app driven by keyboard and mouse events: editing, selection drags, fill, copy/paste, sort, filter, charts, pictures, frozen panes, zoom, save and reopen | **78 / 78** |
+| Core tests (`core/`) | File import/export round-trips on synthetic fixtures | **60 / 60** |
+| Excel function audit ([docs/FUNCTIONS.md](docs/FUNCTIONS.md)) | 195 common functions against Excel's documented results | **191 OK**, 1 wrong (TREND), 3 missing (AGGREGATE, GROUPBY, PIVOTBY) |
+| Real-world files (`scripts/corpus_test.py`) | Opens each of the 783 `.xls`/`.xlsx`/`.xlsm` files of Apache POI's test corpus (Excel files from bug reports, plus deliberately broken ones) in the real app | **738 open**, 0 crashes, 0 hangs. The other 45 are refused with a clear message: 33 fuzzer/malformed/XML-bomb files, 9 password-protected, 3 in the pre-1997 Excel 4 format |
+| Formula values | Every formula of 593 `.xlsx`/`.xlsm` files, before and after the engine changes | identical |
+| Incremental recalculation | 40 random edits on each of 242 Excel-made workbooks (~7,500 recalculations) against a full recalculation | 0 differences |
+| IronCalc's own suites | 3,092 engine tests | 3,085 pass; the 7 failures also fail on unmodified upstream (date-dependent templates and one serialization test) |
+
+Run them:
 
 ```sh
-scripts/build.sh --arm64-only && scripts/ui_tests.sh   # 78 UI tests driven by real keyboard/mouse events
+scripts/build.sh --arm64-only && scripts/ui_tests.sh   # UI tests driven by real keyboard/mouse events
 (cd core && cargo test --release)                       # file-format tests
+scripts/corpus_test.py <folder-of-spreadsheets>         # open every file, report crashes and read errors
 IRONCALC_CHECK_INCREMENTAL=1 scripts/ui_tests.sh        # also verify every incremental recalculation
 ```
 
@@ -257,9 +333,13 @@ compatibile con Excel.
 - Apre e salva `.xlsx`; apre anche `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv` e `.tsv`.
 - Circa 500 funzioni di Excel (motore IronCalc con patch), scritte nella tua lingua:
   su un Mac in italiano scrivi `=SOMMA(A1:A10;B2)`, `SE`, `CERCA.VERT`.
-- Un'unica app universale (Apple silicon e Intel): 7,5 MB da scaricare, si apre in circa 0,24 s.
+- Un'unica app universale (Apple silicon e Intel): 7,5 MB da scaricare, si apre in circa 0,24 s,
+  circa 58 MB di memoria con un foglio vuoto.
+- 1.000 CERCA.VERT su 10.000 righe: 1,3 ms (il motore IronCalc originale impiega 1,7 s).
+  Testato su un Mac con processore M4, macOS 27.
 
-Versione 1.0: copre i fogli di calcolo di tutti i giorni. Non supporta ancora tabelle pivot vere,
+Ultima versione: **1.0.2** ([scarica il DMG](https://github.com/GetFoglio/foglio/releases/download/v1.0.2/Foglio-1.0.2.dmg)).
+Copre i fogli di calcolo di tutti i giorni. Non supporta ancora tabelle pivot vere,
 macro e file protetti da password; tieni un backup dei file importanti. Sito: [getfoglio.app/it](https://getfoglio.app/it/).
 
 **Compilazione:** installa gli Xcode Command Line Tools (`xcode-select --install`) e Rust con
@@ -268,4 +348,5 @@ Homebrew (`brew install rustup`, poi `rustup default stable` e
 `scripts/build.sh` per creare `build/Foglio.app`, oppure `scripts/package.sh` per ottenere
 l'immagine disco `build/Foglio-<versione>.dmg`.
 
-Licenza: MIT oppure Apache-2.0, a tua scelta. I contributi sono benvenuti!
+Licenza: MIT oppure Apache-2.0, a tua scelta. I contributi sono benvenuti, e se Foglio ti è utile
+lascia una ⭐ su GitHub: aiuta altri utenti Mac a trovarlo.
