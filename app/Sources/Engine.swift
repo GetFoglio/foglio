@@ -123,6 +123,17 @@ final class Workbook {
         }
     }
 
+    /// Saves as .xlsm keeping the VBA project of `macroSource` (a macro-enabled file).
+    func saveXLSM(to url: URL, macroSource: URL) throws {
+        var err: UnsafeMutablePointer<CChar>?
+        if foglio_save_xlsm(ptr, url.path, macroSource.path, &err) != 0 {
+            throw EngineError(message: Workbook.take(err) ?? L("The file could not be saved."))
+        }
+    }
+
+    /// True if the file at `url` is a macro-enabled workbook with a VBA project.
+    static func hasMacros(_ url: URL) -> Bool { foglio_has_macros(url.path) == 1 }
+
     func saveCSV(sheet: Int, to url: URL, delimiter: Character = ",") throws {
         var err: UnsafeMutablePointer<CChar>?
         if foglio_save_csv(ptr, UInt32(sheet), url.path, delimiter.asciiValue ?? 44, &err) != 0 {

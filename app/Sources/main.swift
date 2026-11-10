@@ -284,6 +284,15 @@ enum UIScript {
             case "exclude": // exclude G alto
                 let p = arg.split(separator: " ", maxSplits: 1).map(String.init)
                 if p.count == 2, let ref = parseA1(p[0] + "1") { c.grid.applyFilter(col: ref.col, excluded: [p[1]]) }
+            case "savetypes": // what the Save panel offers for this document
+                if let d = c.document as? SpreadsheetDocument {
+                    print("SAVETYPES", d.writableTypes(for: .saveOperation).joined(separator: ","), "filetype=\(d.fileType ?? "")")
+                }
+            case "savedoc": // savedoc /path/file.xlsm|xlsx|csv|tsv  (the document's own write path)
+                let url = URL(fileURLWithPath: arg)
+                let type = ["xlsm": FileTypes.xlsm, "csv": FileTypes.csv, "tsv": FileTypes.tsv][url.pathExtension.lowercased()] ?? FileTypes.xlsx
+                do { try (c.document as? SpreadsheetDocument)?.write(to: url, ofType: type); print("SAVEDDOC", arg, "macros=\(Workbook.hasMacros(url))") }
+                catch { print("SAVE_ERROR", error) }
             case "savexlsx":
                 do { try c.grid.book.saveXLSX(to: URL(fileURLWithPath: arg)); print("SAVED", arg) } catch { print("SAVE_ERROR", error) }
             case "print":

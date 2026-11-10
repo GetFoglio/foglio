@@ -418,3 +418,143 @@ fn load_time_100k_xlsx() {
     println!("LOAD 100k-cell XLSX via calamine path: {:?}", t.elapsed());
     drop(m);
 }
+
+// ---------- templates and macro-enabled workbooks ----------
+
+fn read_zip_entry(path: &Path, name: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    let mut f = z.by_name(name).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).unwrap();
+    Some(buf)
+}
+
+/// Repackages an xlsx as a macro-enabled workbook: a (fake) VBA project, a signature part
+/// with its own relationship, and the code names Excel gives a workbook and its sheets.
+fn make_xlsm(src: &Path, out: &Path, vba: &[u8]) {
+    use std::io::{Read, Write};
+    let mut z = zip::ZipArchive::new(std::fs::File::open(src).unwrap()).unwrap();
+    let mut w = zip::ZipWriter::new(std::fs::File::create(out).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().unwrap().into_owned();
+        let mut s = String::new();
+        if name.ends_with(".xml") || name.ends_with(".rels") {
+            f.read_to_string(&mut s).unwrap();
+        } else {
+            drop(f);
+            w.raw_copy_file(z.by_index_raw(i).unwrap()).unwrap();
+            continue;
+        }
+        let s = match name.as_str() {
+            "[Content_Types].xml" => s
+                .replace(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                    "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                )
+                .replace(
+                    "</Types>",
+                    "<Default Extension=\"bin\" ContentType=\"application/vnd.ms-office.vbaProject\"/>\
+                     <Override PartName=\"/xl/vbaProjectSignature.bin\" ContentType=\"application/vnd.ms-office.vbaProjectSignature\"/></Types>",
+                ),
+            "xl/_rels/workbook.xml.rels" => s.replace(
+                "</Relationships>",
+                "<Relationship Id=\"rId99\" Type=\"http://schemas.microsoft.com/office/2006/relationships/vbaProject\" Target=\"vbaProject.bin\"/></Relationships>",
+            ),
+            "xl/workbook.xml" => s.replacen("<workbookPr", "<workbookPr codeName=\"QuestaCartella\"", 1),
+            "xl/worksheets/sheet1.xml" => s.replacen("<sheetPr", "<sheetPr codeName=\"Foglio1\"", 1),
+            "xl/worksheets/sheet2.xml" => s.replacen("<sheetPr", "<sheetPr codeName=\"Foglio2\"", 1),
+            _ => s,
+        };
+        w.start_file(name.as_str(), opts).unwrap();
+        w.write_all(s.as_bytes()).unwrap();
+    }
+    w.start_file("xl/vbaProject.bin", opts).unwrap();
+    w.write_all(vba).unwrap();
+    w.start_file("xl/vbaProjectSignature.bin", opts).unwrap();
+    w.write_all(b"signature").unwrap();
+    w.start_file("xl/_rels/vbaProject.bin.rels", opts).unwrap();
+    w.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature\" Target=\"vbaProjectSignature.bin\"/></Relationships>").unwrap();
+    w.finish().unwrap();
+}
+
+#[test]
+fn opens_templates_by_extension() {
+    let d = tmp_dir();
+    let xlsx = d.join("template-src.xlsx");
+    write_xlsx(&xlsx);
+    let xltx = d.join("Report.xltx");
+    std::fs::copy(&xlsx, &xltx).unwrap();
+    assert_eq!(Book::open(&xltx).input(0, 4, 2), "=SUM(B2:B3)");
+    let xlt = d.join("Legacy.xlt");
+    std::fs::copy(fixture("sample.xls"), &xlt).unwrap();
+    assert_eq!(Book::open(&xlt).val(0, 4, 2), "12.5");
+    let s = take(foglio_supported_extensions());
+    for ext in ["xltx", "xltm", "xlt"] {
+        assert!(s.split(',').any(|e| e == ext), "{ext} missing from {s}");
+    }
+}
+
+#[test]
+fn xlsm_keeps_macros_on_save() {
+    use foglio_core::macros::{foglio_has_macros, foglio_save_xlsm};
+    let d = tmp_dir();
+    let xlsx = d.join("macro-src.xlsx");
+    let src = d.join("Macro.xlsm");
+    let vba: Vec<u8> = (0..4096u32).map(|i| (i * 31 % 251) as u8).collect();
+    {
+        // rust_xlsxwriter writes <sheetPr> only with a tab colour; write one.
+        use rust_xlsxwriter::{Color, Workbook};
+        let mut wb = Workbook::new();
+        let ws = wb.add_worksheet().set_name("Data").unwrap().set_tab_color(Color::Red);
+        ws.write(0, 0, "Name").unwrap();
+        ws.write(1, 1, 10).unwrap();
+        ws.write_formula(3, 1, "=B2*2").unwrap();
+        let ws2 = wb.add_worksheet().set_name("Second").unwrap().set_tab_color(Color::Blue);
+        ws2.write(0, 0, "x").unwrap();
+        wb.save(&xlsx).unwrap();
+    }
+    make_xlsm(&xlsx, &src, &vba);
+    let csrc = CString::new(src.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { foglio_has_macros(csrc.as_ptr()) }, 1);
+    let cplain = CString::new(xlsx.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { foglio_has_macros(cplain.as_ptr()) }, 0);
+
+    let b = Book::open(&src);
+    let v = CString::new("21").unwrap();
+    assert_eq!(unsafe { foglio_set_input(b.0, 0, 2, 2, v.as_ptr()) }, 0);
+    let out = d.join("Saved.xlsm");
+    let cout = CString::new(out.to_str().unwrap()).unwrap();
+    let mut err: *mut c_char = ptr::null_mut();
+    let rc = unsafe { foglio_save_xlsm(b.0, cout.as_ptr(), csrc.as_ptr(), &mut err) };
+    assert_eq!(rc, 0, "{}", if err.is_null() { String::new() } else { take(err) });
+
+    assert_eq!(read_zip_entry(&out, "xl/vbaProject.bin").unwrap(), vba);
+    assert_eq!(read_zip_entry(&out, "xl/vbaProjectSignature.bin").unwrap(), b"signature");
+    assert!(read_zip_entry(&out, "xl/_rels/vbaProject.bin.rels").is_some());
+    let ct = String::from_utf8(read_zip_entry(&out, "[Content_Types].xml").unwrap()).unwrap();
+    assert!(ct.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"), "{ct}");
+    assert!(ct.contains("Extension=\"bin\""), "{ct}");
+    assert!(ct.contains("/xl/vbaProjectSignature.bin"), "{ct}");
+    let rels = String::from_utf8(read_zip_entry(&out, "xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+    assert_eq!(rels.matches("relationships/vbaProject\"").count(), 1, "{rels}");
+    let wb = String::from_utf8(read_zip_entry(&out, "xl/workbook.xml").unwrap()).unwrap();
+    assert!(wb.contains("<workbookPr codeName=\"QuestaCartella\""), "{wb}");
+    let s1 = String::from_utf8(read_zip_entry(&out, "xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    let s2 = String::from_utf8(read_zip_entry(&out, "xl/worksheets/sheet2.xml").unwrap()).unwrap();
+    assert!(s1.contains("codeName=\"Foglio1\""), "{s1}");
+    assert!(s2.contains("codeName=\"Foglio2\""), "{s2}");
+
+    // The saved file reopens with the edit, and still has its macros for the next save.
+    let again = Book::open(&out);
+    assert_eq!(again.val(0, 4, 2), "42");
+    assert_eq!(unsafe { foglio_has_macros(cout.as_ptr()) }, 1);
+    // Saving over the source itself (Save in place) works too.
+    let rc = unsafe { foglio_save_xlsm(again.0, cout.as_ptr(), cout.as_ptr(), &mut err) };
+    assert_eq!(rc, 0);
+    assert_eq!(read_zip_entry(&out, "xl/vbaProject.bin").unwrap(), vba);
+    let wb = String::from_utf8(read_zip_entry(&out, "xl/workbook.xml").unwrap()).unwrap();
+    assert_eq!(wb.matches("codeName=").count(), 1, "{wb}");
+}

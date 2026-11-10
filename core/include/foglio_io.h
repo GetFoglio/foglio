@@ -16,8 +16,8 @@ typedef struct FoglioBook FoglioBook;
 #endif
 
 // Opens a workbook, choosing the reader by extension (case-insensitive):
-//   .xlsx .xlsm        IronCalc importer (full fidelity); values+formulas fallback if it fails
-//   .xls .xlsb .ods    values, formulas (re-evaluated), dates (shown as dd/mm/yyyy)
+//   .xlsx .xlsm .xltx .xltm  IronCalc importer (full fidelity); values+formulas fallback if it fails
+//   .xls .xlt .xlsb .ods  values, formulas (re-evaluated), dates (shown as dd/mm/yyyy)
 //   .csv .tsv .txt     encoding (UTF-8/UTF-16 BOM/Windows-1252) and delimiter (, ; tab |)
 //                      auto-detected; with ';' decimal commas ("1.234,56") become numbers;
 //                      values starting with '=' are kept as text, never evaluated
@@ -31,8 +31,17 @@ FoglioBook *foglio_open_any(const char *path, char **err_out);
 // The file is replaced atomically. Returns 0 on success, -1 on failure (message in *err_out).
 int32_t foglio_save_csv(FoglioBook *b, uint32_t sheet, const char *path, uint8_t delimiter, char **err_out);
 
+// 1 if `path` is a zip package with a VBA project (xl/vbaProject.bin), else 0.
+int32_t foglio_has_macros(const char *path);
+
+// Saves the workbook as .xlsm at `path`, keeping the VBA project (and its signatures) of
+// `macro_source`, the macro-enabled file the workbook was opened from, and the code names that
+// link the VBA document modules to the workbook and its sheets. Macros are never run or edited.
+// The file is replaced atomically. Returns 0 on success, -1 on failure (message in *err_out).
+int32_t foglio_save_xlsm(FoglioBook *b, const char *path, const char *macro_source, char **err_out);
+
 // Comma-separated list of extensions foglio_open_any understands, lowercase without dots,
-// e.g. "xlsx,xlsm,xls,xlsb,ods,csv,tsv,txt". Free with foglio_string_free.
+// e.g. "xlsx,xlsm,xltx,xltm,xls,xlt,xlsb,ods,csv,tsv,txt". Free with foglio_string_free.
 char *foglio_supported_extensions(void);
 
 #ifdef __cplusplus

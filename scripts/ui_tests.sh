@@ -112,6 +112,20 @@ FILE=$ROOT/core/tests/fixtures/sheet_view.xlsx run "sheet zoom, hidden zeros and
   "VIEW zoom=150 saved=150 filter=A1:C13 excluded=B:B" "SHOWN C2=5" "SHOWN C5=" "VIEW zoom=120 saved=120 filter=A1:C13 excluded=B:B,C:10"
 FILE=/tmp/foglio-ui-sheetview.xlsx run "sheet zoom and AutoFilter saved and reopened" "view;; shown C5" \
   "VIEW zoom=120 saved=120 filter=A1:C13 excluded=B:B,C:10" "SHOWN C5="
+# Macro-enabled workbook (core/tests/fixtures/make_macro_fixture.py): saved as .xlsm by default, VBA project kept
+FILE=$ROOT/core/tests/fixtures/macro_workbook.xlsm run "xlsm: macros kept when saving" \
+  "savetypes;; input B2=20;; savedoc /tmp/foglio-ui-macro.xlsm;; print D4" \
+  "SAVETYPES org.openxmlformats.spreadsheetml.sheet.macroenabled,org.openxmlformats.spreadsheetml.sheet,public.comma-separated-values-text,public.tab-separated-values-text" \
+  "SAVEDDOC /tmp/foglio-ui-macro.xlsm macros=true" "CELL D4 = 54,8"
+FILE=/tmp/foglio-ui-macro.xlsm run "xlsm: reopened with the edit and its macros" "savetypes;; print D4" \
+  "SAVETYPES org.openxmlformats.spreadsheetml.sheet.macroenabled," "CELL D4 = 54,8"
+run "save as tab-separated text" "input A1=Item;; input B1=3,5;; savetypes;; savedoc /tmp/foglio-ui-save.tsv" \
+  "SAVETYPES org.openxmlformats.spreadsheetml.sheet,public.comma-separated-values-text,public.tab-separated-values-text filetype=" \
+  "SAVEDDOC /tmp/foglio-ui-save.tsv macros=false"
+if grep -qP '^Item\t3,5\r?$' /tmp/foglio-ui-save.tsv 2>/dev/null || grep -q "$(printf 'Item\t3,5')" /tmp/foglio-ui-save.tsv 2>/dev/null; then
+  echo "✓ tab-separated file has tabs"; else echo "✗ tab-separated file: $(od -c /tmp/foglio-ui-save.tsv | head -2)"; fail=1; fi
+cp $ROOT/core/tests/fixtures/sheet_view.xlsx /tmp/foglio-ui-template.xltx
+FILE=/tmp/foglio-ui-template.xltx run "Excel template opens" "view;; savetypes" "VIEW zoom=150" "filetype=org.openxmlformats.spreadsheetml.template"
 run "zoom from the menu updates the status bar" "key cmd+opt+-;; zoomui;; key cmd+opt+-;; zoomui" "ZOOMUI 80% slider=80 grid=80" "ZOOMUI 65% slider=65 grid=65"
 if [[ -f ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx ]]; then
   out=$(FOGLIO_PERF=1 FOGLIO_SNAPSHOT=/dev/null FOGLIO_SCRIPT="panes" timeout 40 $APP ${FOGLIO_CORPUS:-/tmp/poi-test/files}/123233_charts.xlsx 2>&1 | grep -c CHARTVIEW)

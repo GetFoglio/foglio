@@ -1,8 +1,8 @@
 //! File import/export: open any common spreadsheet format, save CSV.
 //! See include/foglio_io.h for the C contract.
 //!
-//! * .xlsx/.xlsm  -> IronCalc's own importer (full fidelity); calamine fallback (values + formulas).
-//! * .xls/.xlsb/.ods -> calamine (values + formulas, dates get a date number format).
+//! * .xlsx/.xlsm/.xltx/.xltm -> IronCalc's own importer (full fidelity); calamine fallback (values + formulas).
+//! * .xls/.xlt/.xlsb/.ods -> calamine (values + formulas, dates get a date number format).
 //! * .csv/.tsv/.txt -> encoding + delimiter sniffing, `csv` crate parser.
 //! * anything else -> content sniffing (zip / OLE / text).
 
@@ -24,7 +24,7 @@ use crate::{book_ref, cstr, settings, to_c, write_err, FoglioBook};
 const LAST_ROW: u32 = 1_048_576;
 const LAST_COLUMN: u32 = 16_384;
 
-const SUPPORTED_EXTENSIONS: &str = "xlsx,xlsm,xls,xlsb,ods,csv,tsv,txt";
+const SUPPORTED_EXTENSIONS: &str = "xlsx,xlsm,xltx,xltm,xls,xlt,xlsb,ods,csv,tsv,txt";
 
 // =====================================================================
 // C ABI
@@ -121,8 +121,8 @@ pub(crate) fn open_any(path: &str) -> Result<Model<'static>, String> {
         .map(|e| e.to_ascii_lowercase())
         .unwrap_or_default();
     let kind = match ext.as_str() {
-        "xlsx" | "xlsm" => Kind::Xlsx,
-        "xls" => Kind::Xls,
+        "xlsx" | "xlsm" | "xltx" | "xltm" => Kind::Xlsx,
+        "xls" | "xlt" => Kind::Xls,
         "xlsb" => Kind::Xlsb,
         "ods" => Kind::Ods,
         "csv" | "tsv" | "txt" | "tab" => Kind::Text,

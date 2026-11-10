@@ -5,6 +5,8 @@ enum FileTypes {
     static let xlsx = "org.openxmlformats.spreadsheetml.sheet"
     static let csv = "public.comma-separated-values-text"
     static let tsv = "public.tab-separated-values-text"
+    static let xlsm = "org.openxmlformats.spreadsheetml.sheet.macroenabled"
+    static func isXLSM(_ type: String) -> Bool { type == xlsm || type == "org.foglio.xlsm" }
 }
 
 /// A workbook document: native open/save/revert/recent files/print through AppKit.
@@ -12,6 +14,9 @@ enum FileTypes {
 final class SpreadsheetDocument: NSDocument {
     private(set) var book = Workbook()
     var activeSheet = 0
+    /// Private copy of the macro-enabled file this workbook was opened from: its VBA project is
+    /// written back when saving as .xlsm (macros are never run or edited).
+    private var macroSource: URL?
 
     override class var autosavesInPlace: Bool { false }
     override class var preservesVersions: Bool { false }
@@ -32,14 +37,35 @@ final class SpreadsheetDocument: NSDocument {
     override func read(from url: URL, ofType typeName: String) throws {
         let t = Date()
         book = try Workbook(contentsOf: url)
+        keepMacros(of: url)
         Perf.shared.emit("OPEN_MS", String(format: "%.1f", Date().timeIntervalSince(t) * 1000))
         windowController?.reload()
     }
 
+    private func keepMacros(of url: URL) {
+        guard ["xlsm", "xltm"].contains(url.pathExtension.lowercased()), Workbook.hasMacros(url) else { return }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Foglio-macros", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let copy = dir.appendingPathComponent(UUID().uuidString + ".xlsm")
+        if (try? FileManager.default.copyItem(at: url, to: copy)) != nil {
+            if let old = macroSource { try? FileManager.default.removeItem(at: old) }
+            macroSource = copy
+        }
+    }
+
+    override func close() {
+        if let m = macroSource { try? FileManager.default.removeItem(at: m) }
+        super.close()
+    }
+
     override func write(to url: URL, ofType typeName: String) throws {
         windowController?.grid.commitEditing(move: nil)
-        if typeName == FileTypes.csv || typeName == FileTypes.tsv || url.pathExtension.lowercased() == "csv" {
-            try book.saveCSV(sheet: activeSheet, to: url, delimiter: typeName == FileTypes.tsv ? "\t" : FormulaLocale.current.csvDelimiter)
+        let ext = url.pathExtension.lowercased()
+        if typeName == FileTypes.csv || typeName == FileTypes.tsv || ext == "csv" || ext == "tsv" {
+            let tab = typeName == FileTypes.tsv || ext == "tsv"
+            try book.saveCSV(sheet: activeSheet, to: url, delimiter: tab ? "\t" : FormulaLocale.current.csvDelimiter)
+        } else if FileTypes.isXLSM(typeName) || ext == "xlsm", let source = macroSource {
+            try book.saveXLSM(to: url, macroSource: source)
         } else {
             try book.saveXLSX(to: url)
         }
@@ -82,12 +108,20 @@ final class SpreadsheetDocument: NSDocument {
         super.save(to: url, ofType: typeName, for: op, completionHandler: completionHandler)
     }
 
+    /// Macro-enabled workbooks are saved as .xlsm by default (keeping their macros); .xlsx,
+    /// CSV and tab-separated text are always offered.
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
-        [FileTypes.xlsx, FileTypes.csv]
+        let base = [FileTypes.xlsx, FileTypes.csv, FileTypes.tsv]
+        guard macroSource != nil else { return base }
+        let xlsm = fileType.map(FileTypes.isXLSM) == true ? fileType! : FileTypes.xlsm
+        return [xlsm] + base
     }
 
     override func fileNameExtension(forType typeName: String, saveOperation: NSDocument.SaveOperationType) -> String? {
-        typeName == FileTypes.csv ? "csv" : "xlsx"
+        if typeName == FileTypes.csv { return "csv" }
+        if typeName == FileTypes.tsv { return "tsv" }
+        if FileTypes.isXLSM(typeName) { return "xlsm" }
+        return "xlsx"
     }
 
     override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {

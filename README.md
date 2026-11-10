@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/GetFoglio/foglio/releases/download/v1.0.2/Foglio-1.0.2.dmg"><b>Download Foglio 1.0.2</b></a> ·
+  <a href="https://github.com/GetFoglio/foglio/releases/download/v1.0.3/Foglio-1.0.3.dmg"><b>Download Foglio 1.0.3</b></a> ·
   <a href="https://getfoglio.app">getfoglio.app</a> ·
   <a href="https://github.com/GetFoglio/foglio/releases">All releases</a>
 </p>
@@ -39,13 +39,21 @@ everyday spreadsheets quickly, feel at home on macOS, and stay small.
 Foglio does not try to be Excel. It is the app you open when you need to read, fix or fill in a
 spreadsheet: native, fast, small, and able to open the Excel files you receive.
 
-> **Latest version: 1.0.2** (November 9, 2026). Foglio handles everyday spreadsheets end to end.
-> Keep backups of important files: pivot tables, macros and password-protected files are not
-> supported yet (see [below](#not-yet-supported)).
+> **Latest version: 1.0.3** (November 10, 2026). Foglio handles everyday spreadsheets end to end.
+> Keep backups of important files: pivot tables and password-protected files are not supported
+> yet, and macros are kept but never run (see [below](#not-yet-supported)).
 
 If Foglio is useful to you, a ⭐ on GitHub helps other Mac users find it.
 
 ## What's new
+
+**1.0.3** — more file formats.
+- Macro-enabled workbooks (`.xlsm`) are saved as `.xlsm` and **keep their macros**: the VBA project
+  is copied back unchanged, with the code names that link it to the workbook and its sheets.
+  Foglio never runs or edits macros.
+- Excel templates (`.xltx`, `.xltm`, `.xlt`) open; saving creates a new workbook and leaves the
+  template untouched.
+- Save as tab-separated text (`.tsv`).
 
 **1.0.2** — more Excel files open exactly as they were saved, and stay that way when you save them.
 - Horizontal scroll bar fixed (it was drawn as a tiny vertical bar in the bottom-right corner).
@@ -112,8 +120,10 @@ If Foglio is useful to you, a ⭐ on GitHub helps other Mac users find it.
 **Files**
 - `.xlsx` read/write with formatting (fonts, fills, borders, number formats, merges, column widths,
   row heights, frozen panes, multiple sheets).
-- Opens `.xlsm` (macros are not run), `.xls`, `.xlsb`, `.ods` (values, formulas and dates), and
-  `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and decimal-separator detection.
+- `.xlsm` read/write like `.xlsx`; macros are never run, and are kept when saving as `.xlsm`.
+- Opens Excel templates (`.xltx`, `.xltm` with full formatting, `.xlt`), `.xls`, `.xlsb`, `.ods`
+  (values, formulas and dates), and `.csv` / `.tsv` / `.txt` with automatic encoding, delimiter and
+  decimal-separator detection.
 - Comments, data validation, hyperlinks, tab colours, defined names, conditional formatting, charts
   and pictures are read from and written to `.xlsx`.
 - Pictures in `.xlsx`: `xl/media/imageN.png|jpeg` (an image used several times is stored once),
@@ -129,7 +139,18 @@ If Foglio is useful to you, a ⭐ on GitHub helps other Mac users find it.
   (`xl/richData`) are read as pictures placed in their cells.
 - The sheet's zoom, "show zeros" setting, default row height and AutoFilter (range and value lists) are read
   from and saved to `.xlsx`; pictures that were grouped in the file are saved back as a group.
-- Saves `.xlsx`, exports `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales) and PDF.
+- Saves `.xlsx` and `.xlsm`, `.csv` (UTF-8 with BOM; `;` delimiter in decimal-comma locales),
+  `.tsv`, and exports PDF.
+
+| Format | Opens | Saves |
+|---|---|---|
+| `.xlsx` | everything listed above | ✓ |
+| `.xlsm` | as `.xlsx` (macros not run) | ✓ macros kept |
+| `.xltx` / `.xltm` | as `.xlsx` / `.xlsm` | as a new `.xlsx` / `.xlsm` |
+| `.xls`, `.xlt`, `.xlsb`, `.ods` | values, formulas, dates (no formatting yet) | as `.xlsx` |
+| Strict Open XML `.xlsx` | values and formulas | as `.xlsx` |
+| `.csv`, `.tsv`, `.txt` | ✓ | `.csv`, `.tsv` |
+| Password-protected, Excel 4 and older, `.numbers` | — | — |
 
 **Formulas** — ~500 Excel functions via a patched fork of the [IronCalc](https://github.com/ironcalc/IronCalc) engine
 (incremental recalculation, indexed lookups, Excel-compatibility fixes — see [third_party/README.md](third_party/README.md)),
@@ -139,7 +160,7 @@ families. See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for the compatibility audit
 ### Not yet supported
 
 Real pivot tables (use *Summarize by*), shapes/text boxes/SmartArt (skipped when
-reading), picture effects (borders, shadows, rotation), macros, password-protected files, data
+reading), picture effects (borders, shadows, rotation), running macros, password-protected files, data
 bars/icon sets, sparklines, threaded comments (shown as plain notes).
 
 ## Speed and size
@@ -177,10 +198,11 @@ much less waiting:
 
 ## Tests and compatibility
 
-| Suite | What it checks | Result (1.0.2) |
+| Suite | What it checks | Result (1.0.3) |
 |---|---|---|
-| UI tests (`scripts/ui_tests.sh`) | The real app driven by keyboard and mouse events: editing, selection drags, fill, copy/paste, sort, filter, charts, pictures, frozen panes, zoom, save and reopen | **78 / 78** |
-| Core tests (`core/`) | File import/export round-trips on synthetic fixtures | **60 / 60** |
+| UI tests (`scripts/ui_tests.sh`) | The real app driven by keyboard and mouse events: editing, selection drags, fill, copy/paste, sort, filter, charts, pictures, frozen panes, zoom, save and reopen | **83 / 83** |
+| Core tests (`core/`) | File import/export round-trips on synthetic fixtures, macros kept byte for byte | **64 / 64** |
+| Macro-enabled files | The 9 `.xlsm` files with a VBA project in Apache POI's corpus, opened and saved as `.xlsm` | VBA project identical, all code names kept, 9 / 9 |
 | Excel function audit ([docs/FUNCTIONS.md](docs/FUNCTIONS.md)) | 195 common functions against Excel's documented results | **191 OK**, 1 wrong (TREND), 3 missing (AGGREGATE, GROUPBY, PIVOTBY) |
 | Real-world files (`scripts/corpus_test.py`) | Opens each of the 783 `.xls`/`.xlsx`/`.xlsm` files of Apache POI's test corpus (Excel files from bug reports, plus deliberately broken ones) in the real app | **738 open**, 0 crashes, 0 hangs. The other 45 are refused with a clear message: 33 fuzzer/malformed/XML-bomb files, 9 password-protected, 3 in the pre-1997 Excel 4 format |
 | Formula values | Every formula of 593 `.xlsx`/`.xlsm` files, before and after the engine changes | identical |
@@ -330,7 +352,8 @@ above, without any additional terms or conditions.
 compatibile con Excel.
 
 - App Mac nativa (AppKit), niente Electron. Gratuita, senza account, senza pubblicità.
-- Apre e salva `.xlsx`; apre anche `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv` e `.tsv`.
+- Apre e salva `.xlsx` e `.xlsm` (le macro restano nel file, ma non vengono mai eseguite), `.csv` e `.tsv`;
+  apre anche i modelli `.xltx`/`.xltm`/`.xlt`, `.xls`, `.xlsb` e `.ods`.
 - Circa 500 funzioni di Excel (motore IronCalc con patch), scritte nella tua lingua:
   su un Mac in italiano scrivi `=SOMMA(A1:A10;B2)`, `SE`, `CERCA.VERT`.
 - Un'unica app universale (Apple silicon e Intel): 7,5 MB da scaricare, si apre in circa 0,24 s,
@@ -338,9 +361,9 @@ compatibile con Excel.
 - 1.000 CERCA.VERT su 10.000 righe: 1,3 ms (il motore IronCalc originale impiega 1,7 s).
   Testato su un Mac con processore M4, macOS 27.
 
-Ultima versione: **1.0.2** ([scarica il DMG](https://github.com/GetFoglio/foglio/releases/download/v1.0.2/Foglio-1.0.2.dmg)).
-Copre i fogli di calcolo di tutti i giorni. Non supporta ancora tabelle pivot vere,
-macro e file protetti da password; tieni un backup dei file importanti. Sito: [getfoglio.app/it](https://getfoglio.app/it/).
+Ultima versione: **1.0.3** ([scarica il DMG](https://github.com/GetFoglio/foglio/releases/download/v1.0.3/Foglio-1.0.3.dmg)).
+Copre i fogli di calcolo di tutti i giorni. Non supporta ancora tabelle pivot vere
+e file protetti da password, e non esegue le macro; tieni un backup dei file importanti. Sito: [getfoglio.app/it](https://getfoglio.app/it/).
 
 **Compilazione:** installa gli Xcode Command Line Tools (`xcode-select --install`) e Rust con
 Homebrew (`brew install rustup`, poi `rustup default stable` e

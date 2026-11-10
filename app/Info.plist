@@ -8,8 +8,8 @@
     <key>CFBundleExecutable</key><string>Foglio</string>
     <key>CFBundleIconFile</key><string>Foglio</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0.2</string>
-    <key>CFBundleVersion</key><string>3</string>
+    <key>CFBundleShortVersionString</key><string>1.0.3</string>
+    <key>CFBundleVersion</key><string>4</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticTermination</key><false/>
@@ -29,11 +29,25 @@
             <key>LSItemContentTypes</key><array><string>org.openxmlformats.spreadsheetml.sheet</string></array>
         </dict>
         <dict>
+            <key>CFBundleTypeName</key><string>Excel Macro-Enabled Workbook</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
+            <key>LSItemContentTypes</key><array><string>org.openxmlformats.spreadsheetml.sheet.macroenabled</string><string>org.foglio.xlsm</string></array>
+        </dict>
+        <dict>
             <key>CFBundleTypeName</key><string>CSV Document</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
             <key>LSItemContentTypes</key><array><string>public.comma-separated-values-text</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>Tab-Separated Text</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>NSDocumentClass</key><string>SpreadsheetDocument</string>
+            <key>LSItemContentTypes</key><array><string>public.tab-separated-values-text</string></array>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>Spreadsheet (read-only formats)</string>
@@ -43,12 +57,15 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.microsoft.excel.xls</string>
-                <string>org.openxmlformats.spreadsheetml.sheet.macroenabled</string>
                 <string>com.microsoft.excel.sheet.binary.macroenabled</string>
-                <string>org.foglio.xlsm</string>
                 <string>org.foglio.xlsb</string>
                 <string>org.oasis-open.opendocument.spreadsheet</string>
-                <string>public.tab-separated-values-text</string>
+                <string>org.openxmlformats.spreadsheetml.template</string>
+                <string>org.openxmlformats.spreadsheetml.template.macroenabled</string>
+                <string>com.microsoft.excel.xlt</string>
+                <string>org.foglio.xltx</string>
+                <string>org.foglio.xltm</string>
+                <string>org.foglio.xlt</string>
                 <string>public.plain-text</string>
             </array>
         </dict>
@@ -82,6 +99,27 @@
             <key>UTTypeConformsTo</key><array><string>public.data</string></array>
             <key>UTTypeTagSpecification</key>
             <dict><key>public.filename-extension</key><array><string>xls</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.foglio.xltx</string>
+            <key>UTTypeDescription</key><string>Excel Template</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.zip-archive</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xltx</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.foglio.xltm</string>
+            <key>UTTypeDescription</key><string>Excel Macro-Enabled Template</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.zip-archive</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xltm</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.foglio.xlt</string>
+            <key>UTTypeDescription</key><string>Excel 97-2004 Template</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>xlt</string></array></dict>
         </dict>
     </array>
 </dict>

@@ -45,6 +45,7 @@ pub unsafe extern "C" fn foglio_set_locale(locale: *const c_char, language: *con
 mod features;
 mod fnames;
 pub mod io;
+pub mod macros; // .xlsm: keep the VBA project on save, C ABI in include/foglio_io.h
 
 #[repr(C)]
 pub struct FoglioCell {
