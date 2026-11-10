@@ -6,7 +6,7 @@
 
 <p align="center">
   A free, lightweight, native spreadsheet for macOS that opens your Excel files.<br>
-  7.5 MB download · opens in 0.24 s · no account, no subscription.
+  7.7 MB download · opens in 0.24 s · no account, no subscription.
 </p>
 
 <p align="center">
@@ -170,8 +170,8 @@ Details and the benchmark harness: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 | | Foglio 1.0.x |
 |---|---|
-| Download (DMG, universal) | **7.5 MB** |
-| App size on disk | 19 MB (Apple silicon + Intel in one app) |
+| Download (DMG, universal) | **7.7 MB** |
+| App size on disk | 20 MB (Apple silicon + Intel in one app) |
 | Launch to first frame (warm) | **~0.24 s** |
 | Memory, empty sheet | ~58 MB (`footprint`), 0 % CPU when idle |
 | Open a 100k-row `.xlsx` (300k formulas) | 1.1 s, ~171 MB |
@@ -356,7 +356,7 @@ compatibile con Excel.
   apre anche i modelli `.xltx`/`.xltm`/`.xlt`, `.xls`, `.xlsb` e `.ods`.
 - Circa 500 funzioni di Excel (motore IronCalc con patch), scritte nella tua lingua:
   su un Mac in italiano scrivi `=SOMMA(A1:A10;B2)`, `SE`, `CERCA.VERT`.
-- Un'unica app universale (Apple silicon e Intel): 7,5 MB da scaricare, si apre in circa 0,24 s,
+- Un'unica app universale (Apple silicon e Intel): 7,7 MB da scaricare, si apre in circa 0,24 s,
   circa 58 MB di memoria con un foglio vuoto.
 - 1.000 CERCA.VERT su 10.000 righe: 1,3 ms (il motore IronCalc originale impiega 1,7 s).
   Testato su un Mac con processore M4, macOS 27.

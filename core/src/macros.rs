@@ -7,11 +7,18 @@
 use std::collections::HashMap;
 use std::ffi::c_char;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
+use zip::{ZipArchive, ZipWriter};
+
+// The same reader/writer types IronCalc and calamine use, so the zip code is shared, not duplicated.
+type Archive = ZipArchive<BufReader<File>>;
+
+fn open_zip(path: &str) -> Result<Archive, String> {
+    ZipArchive::new(BufReader::new(File::open(path).map_err(|e| e.to_string())?)).map_err(|e| e.to_string())
+}
 
 use crate::{book, cstr, write_err, FoglioBook};
 
@@ -34,14 +41,14 @@ pub struct MacroParts {
     sheet_code_names: HashMap<String, String>,
 }
 
-fn read_entry(zip: &mut ZipArchive<File>, name: &str) -> Option<Vec<u8>> {
+fn read_entry(zip: &mut Archive, name: &str) -> Option<Vec<u8>> {
     let mut f = zip.by_name(name).ok()?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).ok()?;
     Some(buf)
 }
 
-fn read_text(zip: &mut ZipArchive<File>, name: &str) -> Option<String> {
+fn read_text(zip: &mut Archive, name: &str) -> Option<String> {
     read_entry(zip, name).and_then(|b| String::from_utf8(b).ok())
 }
 
@@ -116,8 +123,7 @@ fn escape(s: &str) -> String {
 
 /// Reads the VBA project of `path`. `Ok(None)` if the file has no macros.
 pub fn read_macro_parts(path: &str) -> Result<Option<MacroParts>, String> {
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mut zip = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut zip = open_zip(path)?;
     let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
     let vba: Vec<String> = names
         .iter()
@@ -182,7 +188,7 @@ fn insert_before(xml: &str, before: &[&str], el: String) -> Option<String> {
 
 /// Rewrites the xlsx package at `xlsx` into a macro-enabled package at `out`.
 pub fn write_xlsm(xlsx: &str, macros: &MacroParts, out: &str) -> Result<(), String> {
-    let mut zip = ZipArchive::new(File::open(xlsx).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let mut zip = open_zip(xlsx)?;
     let workbook = read_text(&mut zip, "xl/workbook.xml").ok_or("workbook.xml missing")?;
     let rels = read_text(&mut zip, "xl/_rels/workbook.xml.rels").ok_or("workbook.xml.rels missing")?;
     let types = read_text(&mut zip, "[Content_Types].xml").ok_or("[Content_Types].xml missing")?;
@@ -237,18 +243,19 @@ pub fn write_xlsm(xlsx: &str, macros: &MacroParts, out: &str) -> Result<(), Stri
         replaced.insert(part, new.into_bytes());
     }
 
-    let mut w = ZipWriter::new(File::create(out).map_err(|e| e.to_string())?);
-    let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    for i in 0..zip.len() {
-        let entry = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-        let name = entry.name().map_err(|e| e.to_string())?.into_owned();
-        if let Some(data) = replaced.get(&name) {
-            drop(entry);
-            w.start_file(name.as_str(), opts).map_err(|e| e.to_string())?;
-            w.write_all(data).map_err(|e| e.to_string())?;
-        } else {
-            w.raw_copy_file(entry).map_err(|e| e.to_string())?;
+    let mut w = ZipWriter::new(BufWriter::new(File::create(out).map_err(|e| e.to_string())?));
+    let opts = SimpleFileOptions::default();
+    let names: Vec<String> = zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())).collect();
+    for name in names {
+        if name.ends_with('/') {
+            continue; // directory entries
         }
+        let data = match replaced.remove(&name) {
+            Some(d) => d,
+            None => read_entry(&mut zip, &name).ok_or_else(|| format!("cannot read {name}"))?,
+        };
+        w.start_file(name.as_str(), opts).map_err(|e| e.to_string())?;
+        w.write_all(&data).map_err(|e| e.to_string())?;
     }
     for (name, data) in &macros.files {
         if zip.index_for_name(name).is_none() {
